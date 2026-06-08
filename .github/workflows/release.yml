@@ -99,4 +99,3 @@ jobs:
         with:
           files: encoding-vfs-*.tar.gz
           generate_release_notes: true
-          draft: true
