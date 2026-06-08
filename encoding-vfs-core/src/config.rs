@@ -8,6 +8,7 @@ pub struct Config {
     pub mount: MountConfig,
     pub encoding: EncodingConfig,
     pub log: Option<LogConfig>,
+    pub filter: Option<FilterConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,6 +90,8 @@ fn default_log_file() -> Option<PathBuf> {
     None
 }
 
+pub use crate::filter::FilterConfig;
+
 impl Config {
     pub fn load(path: Option<&PathBuf>) -> Result<Self, VfsError> {
         match path {
@@ -124,6 +127,7 @@ impl Config {
                         level: "info".to_string(),
                         file: None,
                     }),
+                    filter: None,
                 })
             }
         }

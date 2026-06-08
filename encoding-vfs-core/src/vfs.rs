@@ -10,6 +10,7 @@ use crate::config::EncodingConfig;
 use crate::detector::detect_encoding;
 use crate::encoding::{get_encoding, from_encoding, to_encoding};
 use crate::error::VfsError;
+use crate::filter::VfsFilter;
 
 /// File information returned by get_file_info
 #[derive(Debug)]
@@ -45,6 +46,8 @@ pub struct EncodingVfs {
     pub target_encoding: &'static Encoding,
     /// Default encoding for auto-detection fallback.
     pub default_encoding: &'static Encoding,
+    /// Path filter rules.
+    pub filter: VfsFilter,
 }
 
 impl EncodingVfs {
@@ -69,6 +72,20 @@ impl EncodingVfs {
             encoding_config.cache_ttl_seconds,
         );
 
+        // Build filter: look for .encodingvfs-ignore in backend_dir, merge with inline rules
+        let ignore_path = backend_dir.join(".encodingvfs-ignore");
+        let inline_rules: &[String] = &[];
+        let filter = match &encoding_config.filter {
+            Some(fc) => VfsFilter::new(
+                Some(&ignore_path),
+                fc.rules.as_ref(),
+            ),
+            None => VfsFilter::new(
+                Some(&ignore_path),
+                inline_rules,
+            ),
+        };
+
         Ok(Self {
             backend_dir: backend_dir.to_path_buf(),
             encoding_config,
@@ -76,6 +93,7 @@ impl EncodingVfs {
             source_encoding,
             target_encoding,
             default_encoding,
+            filter,
         })
     }
 
@@ -150,6 +168,11 @@ impl EncodingVfs {
         // Read raw bytes from backend
         let raw = self.read_backend_bytes(&full_path, offset, len)?;
 
+        // Passthrough: return raw bytes without encoding conversion
+        if self.filter.is_passthrough(rel_path) {
+            return Ok(raw);
+        }
+
         // Determine source encoding
         let src_enc = if self.encoding_config.source_encoding.eq_ignore_ascii_case("auto") {
             self.resolve_encoding(&full_path)
@@ -213,6 +236,17 @@ impl EncodingVfs {
         let full_path = self.full_path(rel_path);
         let metadata = fs::metadata(&full_path)?;
 
+        // Passthrough: report raw size directly
+        if self.filter.is_passthrough(rel_path) {
+            return Ok(FileInfo {
+                size: metadata.len(),
+                created: metadata.created()?,
+                modified: metadata.modified()?,
+                accessed: metadata.accessed()?,
+                is_dir: false,
+            });
+        }
+
         // Calculate target encoding size
         let raw = self.read_backend_bytes(&full_path, 0, metadata.len() as usize)?;
         let enc = self.resolve_encoding(&full_path);
@@ -233,15 +267,32 @@ impl EncodingVfs {
         let entries = fs::read_dir(&full_path)?;
 
         entries
-            .map(|e| {
-                let e = e?;
-                let metadata = e.metadata()?;
-                Ok(DirEntry {
+            .filter_map(|e| {
+                let e = match e {
+                    Ok(e) => e,
+                    Err(_) => return Some(Err(VfsError::Io(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "failed to read directory entry",
+                    )))),
+                };
+                let metadata = match e.metadata() {
+                    Ok(m) => m,
+                    Err(_) => return Some(Err(VfsError::Io(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "failed to read metadata",
+                    )))),
+                };
+                // Build relative path for filter check
+                let child_rel = rel_path.join(e.file_name());
+                if self.filter.is_ignored(&child_rel) {
+                    return None;
+                }
+                Some(Ok(DirEntry {
                     name: e.file_name(),
                     is_dir: metadata.is_dir(),
                     size: metadata.len(),
-                    modified: metadata.modified()?,
-                })
+                    modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                }))
             })
             .collect()
     }
