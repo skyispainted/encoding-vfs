@@ -261,7 +261,7 @@ impl FileSystemContext for WinFspVfsHost {
         &self,
         context: &Self::FileContext,
         _pattern: Option<&U16CStr>,
-        _marker: DirMarker,
+        marker: DirMarker,
         buffer: &mut [u8],
     ) -> Result<u32> {
         if !context.is_dir {
@@ -289,12 +289,25 @@ impl FileSystemContext for WinFspVfsHost {
             di.append_to_buffer(buffer, &mut cursor).then_some(())
         };
 
-        let epoch = Self::file_time(SystemTime::UNIX_EPOCH);
+        // On first call (marker is None), prepend "." and ".."
+        if marker.is_none() {
+            let epoch = Self::file_time(SystemTime::UNIX_EPOCH);
+            add_entry(".", true, 0, epoch);
+            add_entry("..", true, 0, epoch);
+        }
 
-        add_entry(".", true, 0, epoch);
-        add_entry("..", true, 0, epoch);
+        // Skip entries before the marker position
+        let skip_past: Option<String> = marker.inner_as_cstr().map(|c| c.to_string_lossy());
+        let mut skipping = skip_past.is_some();
 
         for entry in entries {
+            if skipping {
+                let entry_name = entry.name.to_string_lossy();
+                if entry_name.as_ref() == skip_past.as_deref().unwrap() {
+                    skipping = false;
+                }
+                continue;
+            }
             let mtime = Self::file_time(entry.modified);
             if add_entry(&entry.name.to_string_lossy(), entry.is_dir, entry.size, mtime).is_none() {
                 break;
@@ -342,11 +355,11 @@ impl FileSystemContext for WinFspVfsHost {
     }
 
     fn get_volume_info(&self, out_volume_info: &mut VolumeInfo) -> Result<()> {
-        info!("get_volume_info called");
+        debug!("get_volume_info called");
         out_volume_info.total_size = 1_099_511_627_776;
         out_volume_info.free_size = 549_755_813_888;
         out_volume_info.set_volume_label("EncodingVFS");
-        info!("get_volume_info -> ok");
+        debug!("get_volume_info -> ok");
         Ok(())
     }
 }
