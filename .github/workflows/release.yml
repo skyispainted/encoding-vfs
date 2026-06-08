@@ -51,6 +51,7 @@ jobs:
         with:
           files: encoding-vfs-*.zip
           generate_release_notes: true
+          draft: true
 
   build-linux:
     name: Linux x64
@@ -99,3 +100,4 @@ jobs:
         with:
           files: encoding-vfs-*.tar.gz
           generate_release_notes: true
+          draft: true
