@@ -42,7 +42,6 @@ jobs:
           $dir = "encoding-vfs-Windows-x64-v${version}"
           New-Item -Path $dir -ItemType Directory -Force
           Copy-Item target\release\encoding-vfs.exe $dir\
-          Copy-Item target\release\winfsp-x64.dll $dir\
           Copy-Item README.md $dir\
           Copy-Item encoding-vfs.toml.example $dir\ -ErrorAction SilentlyContinue
           Compress-Archive -Path "$dir\*" -DestinationPath "${dir}.zip"
@@ -84,7 +83,9 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build release
-        run: cargo build --release
+        run: |
+          cargo build --release
+          cargo build --release --package encoding-vfs-linux --features mount
 
       - name: Package binary
         run: |
