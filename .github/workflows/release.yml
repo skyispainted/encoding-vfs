@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release
+        run: cargo build --release --features mount
+        working-directory: ${{ github.workspace }}
+
+      - name: Package binary
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF -replace 'refs/tags/v', ''
+          $dir = "encoding-vfs-Windows-x64-v${version}"
+          New-Item -Path $dir -ItemType Directory -Force
+          Copy-Item target\release\encoding-vfs.exe $dir\
+          Copy-Item target\release\winfsp-x64.dll $dir\
+          Copy-Item README.md $dir\
+          Copy-Item encoding-vfs.toml.example $dir\ -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$dir\*" -DestinationPath "${dir}.zip"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: encoding-vfs-*.zip
+          generate_release_notes: true
+          draft: true
+
+  build-linux:
+    name: Linux x64
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse3-dev pkg-config
+
+      - name: Setup Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package binary
+        run: |
+          version="${GITHUB_REF#refs/tags/v}"
+          dir="encoding-vfs-Linux-x64-v${version}"
+          mkdir -p "$dir"
+          cp target/release/encoding-vfs "$dir/"
+          cp README.md "$dir/"
+          [ -f encoding-vfs.toml.example ] && cp encoding-vfs.toml.example "$dir/" || true
+          tar czf "${dir}.tar.gz" "$dir"/*
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: encoding-vfs-*.tar.gz
+          generate_release_notes: true
+          draft: true

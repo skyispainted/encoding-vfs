@@ -14,11 +14,10 @@ mount = ["encoding-vfs-windows/mount"]
 
 [dependencies]
 encoding-vfs-core = { path = "../encoding-vfs-core" }
-encoding-vfs-windows = { path = "../encoding-vfs-windows" }
+encoding-vfs-windows = { path = "../encoding-vfs-windows", optional = true }
 clap = { version = "=4.4.11", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# TODO: Add Linux FUSE support when building on Linux
-# [target.'cfg(target_os = "linux")'.dependencies]
-# encoding-vfs-linux = { path = "../encoding-vfs-linux" }
+[target.'cfg(target_os = "linux")'.dependencies]
+encoding-vfs-linux = { path = "../encoding-vfs-linux" }

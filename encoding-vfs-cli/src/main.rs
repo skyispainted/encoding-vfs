@@ -88,12 +88,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Platform: Linux");
         info!("Mount point: {}", args.mount);
 
-        // TODO: uncomment when encoding-vfs-linux crate is available
-        // let host = encoding_vfs_linux::FuseVfsHost::new(vfs);
-        // encoding_vfs_linux::run(host, &args.mount)?;
-
-        let _ = vfs;
-        warn!("Linux FUSE adapter not yet available");
+        let host = encoding_vfs_linux::FuseVfsHost::new(vfs);
+        encoding_vfs_linux::run(host, &args.mount)?;
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]

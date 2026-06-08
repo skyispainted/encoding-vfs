@@ -26,8 +26,30 @@ Claude Code (and most modern tools) expect files to be UTF-8. Legacy projects of
 
 ### Prerequisites
 
-- **Rust toolchain** — `rustup toolchain install stable`
-- **WinFsp 2.1 runtime** — SxS installation (custom build with unique driver name, e.g. `WinFsp+20260608T063400Z`), or standard installation from [GitHub releases](https://github.com/winfsp/winfsp/releases)
+#### 1. Install WinFsp 2.1 runtime
+
+This project requires WinFsp 2.1 for the virtual drive mount. Install it first:
+
+**Method A: winget (recommended)**
+```powershell
+winget install WinFsp.WinFsp
+```
+
+**Method B: Manual download**
+
+Download the installer from [WinFsp releases](https://github.com/winfsp/winfsp/releases) and run `winfsp-*.msi`.
+
+Verify the service is running:
+```powershell
+Get-Service WinFsp.Launcher
+# Should show Status: Running
+```
+
+#### 2. Install Rust toolchain
+
+```powershell
+rustup toolchain install stable
+```
 
 ### Build
 
@@ -213,6 +235,7 @@ C:\projects\file-io-proxy\
 ### WinFsp Notes
 
 - Uses **winfsp** crate (v0.12.6+winfsp-2.1) with `FileSystemContext` trait
-- SxS (side-by-side) installation supported — each WinFsp build gets a unique driver name
+- Standard MSI install via `winget install WinFsp.WinFsp` is recommended for most users
+- SxS (side-by-side) installation supported for custom builds with unique driver names
 - Security: returns null security descriptor, letting WinFsp apply defaults
 - Tested: directory listing, file creation, read, write all verified working
