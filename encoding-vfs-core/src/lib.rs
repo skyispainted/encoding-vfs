@@ -9,4 +9,4 @@ pub mod error;
 pub use config::Config;
 pub use vfs::EncodingVfs;
 pub use error::VfsError;
-pub use filter::FilterConfig;
+pub use filter::{FilterConfig, FilterMode};

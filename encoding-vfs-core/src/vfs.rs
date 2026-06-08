@@ -10,7 +10,7 @@ use crate::config::EncodingConfig;
 use crate::detector::detect_encoding;
 use crate::encoding::{get_encoding, from_encoding, to_encoding};
 use crate::error::VfsError;
-use crate::filter::VfsFilter;
+use crate::filter::{VfsFilter, FilterMode};
 
 /// File information returned by get_file_info
 #[derive(Debug)]
@@ -74,15 +74,16 @@ impl EncodingVfs {
 
         // Build filter: look for .encodingvfs-ignore in backend_dir, merge with inline rules
         let ignore_path = backend_dir.join(".encodingvfs-ignore");
-        let inline_rules: &[String] = &[];
         let filter = match &encoding_config.filter {
             Some(fc) => VfsFilter::new(
                 Some(&ignore_path),
-                fc.rules.as_ref(),
+                &fc.rules,
+                fc.mode,
             ),
             None => VfsFilter::new(
                 Some(&ignore_path),
-                inline_rules,
+                &[],
+                FilterMode::Blacklist,
             ),
         };
 
