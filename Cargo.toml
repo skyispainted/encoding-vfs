@@ -3,5 +3,6 @@ members = [
     "encoding-vfs-core",
     "encoding-vfs-cli",
     "encoding-vfs-windows",
+    "encoding-vfs-linux",
 ]
 resolver = "2"

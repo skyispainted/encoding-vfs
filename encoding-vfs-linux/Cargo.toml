@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "FUSE adapter for encoding-vfs: mounts GBK files as UTF-8 virtual directory"
 
+[features]
+default = []
+mount = ["fuser"]
+
 [dependencies]
 encoding-vfs-core = { path = "../encoding-vfs-core" }
-fuser = "0.14"
+fuser = { version = "0.14", optional = true }
 libc = "0.2"
 tracing = "0.1"

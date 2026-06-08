@@ -19,5 +19,6 @@ clap = { version = "=4.4.11", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Linux FUSE support - only available when building on Linux
 [target.'cfg(target_os = "linux")'.dependencies]
-encoding-vfs-linux = { path = "../encoding-vfs-linux" }
+encoding-vfs-linux = { path = "../encoding-vfs-linux", features = ["mount"] }
