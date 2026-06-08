@@ -72,16 +72,16 @@ impl EncodingVfs {
             encoding_config.cache_ttl_seconds,
         );
 
-        // Build filter: look for .encodingvfs-ignore in backend_dir, merge with inline rules
-        let ignore_path = backend_dir.join(".encodingvfs-ignore");
+        // Build filter: look for .encodingvfs-filter in backend_dir, merge with inline rules
+        let filter_path = backend_dir.join(".encodingvfs-filter");
         let filter = match &encoding_config.filter {
             Some(fc) => VfsFilter::new(
-                Some(&ignore_path),
+                Some(&filter_path),
                 &fc.rules,
                 fc.mode,
             ),
             None => VfsFilter::new(
-                Some(&ignore_path),
+                Some(&filter_path),
                 &[],
                 FilterMode::Blacklist,
             ),

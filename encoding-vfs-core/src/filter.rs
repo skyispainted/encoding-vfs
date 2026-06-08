@@ -39,20 +39,20 @@ pub struct FilterConfig {
     /// Filter mode: "blacklist" (default) or "whitelist"
     #[serde(default)]
     pub mode: FilterMode,
-    /// Path to ignore file (default: ".encodingvfs-ignore")
+    /// Path to filter file (default: ".encodingvfs-filter")
     #[serde(default)]
-    pub ignore_file: Option<String>,
+    pub filter_file: Option<String>,
     /// Inline glob rules, same format as .encodingvfs-ignore
     #[serde(default)]
     pub rules: Vec<String>,
 }
 
 impl VfsFilter {
-    pub fn new(ignore_path: Option<&Path>, inline_rules: &[String], mode: FilterMode) -> Self {
+    pub fn new(filter_path: Option<&Path>, inline_rules: &[String], mode: FilterMode) -> Self {
         let mut all_lines: Vec<String> = Vec::new();
 
-        // Read ignore file if it exists
-        if let Some(p) = ignore_path {
+        // Read filter file if it exists
+        if let Some(p) = filter_path {
             if let Ok(content) = std::fs::read_to_string(p) {
                 for line in content.lines() {
                     let trimmed = line.trim();
