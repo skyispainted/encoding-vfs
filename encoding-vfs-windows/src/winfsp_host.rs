@@ -89,6 +89,11 @@ impl FileSystemContext for WinFspVfsHost {
         let is_dir = full_path.is_dir();
         let attrs = Self::file_attributes(is_dir);
 
+        if name.contains("KItem.cpp") {
+            debug!("get_security_by_name: name={} full_path={} is_dir={} attrs=0x{:X}",
+                name, full_path.display(), is_dir, attrs);
+        }
+
         // Return no security descriptor; let WinFsp use defaults.
         Ok(FileSecurity {
             reparse: false,
@@ -115,6 +120,11 @@ impl FileSystemContext for WinFspVfsHost {
 
         let is_dir = full_path.is_dir();
         let is_dir_requested = create_options & FILE_DIRECTORY_FILE != 0;
+
+        if name.contains("KItem.cpp") {
+            debug!("open: name={} full_path={} is_dir={} is_dir_requested={} create_options=0x{:X}",
+                name, full_path.display(), is_dir, is_dir_requested, create_options);
+        }
 
         // Only reject if a directory was explicitly requested but the target is not one.
         // Allow opening a directory without FILE_DIRECTORY_FILE (common with
@@ -143,7 +153,7 @@ impl FileSystemContext for WinFspVfsHost {
         file_name: &U16CStr,
         create_options: u32,
         _granted_access: u32,
-        _file_attributes: u32,
+        file_attributes: u32,
         _security_descriptor: Option<&[c_void]>,
         _allocation_size: u64,
         _extra_buffer: Option<&[u8]>,
@@ -151,9 +161,18 @@ impl FileSystemContext for WinFspVfsHost {
         file_info: &mut OpenFileInfo,
     ) -> Result<Self::FileContext> {
         const FILE_DIRECTORY_FILE: u32 = 0x00000001;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x00000010;
 
         let full_path = self.resolve_path(&file_name.to_string_lossy());
-        let is_dir = create_options & FILE_DIRECTORY_FILE != 0;
+        // Determine directory status from both create_options and file_attributes.
+        let is_dir = create_options & FILE_DIRECTORY_FILE != 0
+            || file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+
+        let fname = file_name.to_string_lossy();
+        if fname.contains("KItem") || fname.contains("tmp") || fname.contains("vscode") {
+            debug!("create: name={} full_path={} is_dir={} create_options=0x{:X} file_attributes=0x{:X}",
+                fname, full_path.display(), is_dir, create_options, file_attributes);
+        }
 
         if is_dir {
             std::fs::create_dir_all(&full_path)
@@ -177,6 +196,90 @@ impl FileSystemContext for WinFspVfsHost {
 
     fn cleanup(&self, _context: &Self::FileContext, _file_name: Option<&U16CStr>, _flags: u32) {}
 
+    fn overwrite(
+        &self,
+        context: &Self::FileContext,
+        _file_attributes: u32,
+        _replace_file_attributes: bool,
+        _allocation_size: u64,
+        _extra_buffer: Option<&[u8]>,
+        file_info: &mut FileInfo,
+    ) -> Result<()> {
+        if context.is_dir {
+            return Err(windows::Win32::Foundation::STATUS_FILE_IS_A_DIRECTORY.into());
+        }
+        // Truncate the file to zero
+        let rel = self.rel_path(&context.path);
+        match self.vfs.write_file(rel, 0, &[]) {
+            Ok(_) => {}
+            Err(_) => {
+                // Fallback: try truncating via std
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(&context.path)
+                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+            }
+        }
+        let metadata = std::fs::metadata(&context.path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+        let modified = metadata.modified().unwrap_or(SystemTime::now());
+        Self::fill_file_info(file_info, false, metadata.len(), modified);
+        Ok(())
+    }
+
+    fn set_file_size(
+        &self,
+        context: &Self::FileContext,
+        new_size: u64,
+        set_allocation_size: bool,
+        file_info: &mut FileInfo,
+    ) -> Result<()> {
+        if context.is_dir {
+            return Err(windows::Win32::Foundation::STATUS_FILE_IS_A_DIRECTORY.into());
+        }
+        // Write zeros to extend/truncate the file to new_size
+        let rel = self.rel_path(&context.path);
+        match self.vfs.write_file(rel, 0, &vec![0u8; new_size as usize]) {
+            Ok(_) => {}
+            Err(_) => {
+                // Fallback
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(&context.path)
+                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?
+                    .set_len(new_size)
+                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+            }
+        }
+        if set_allocation_size {
+            let metadata = std::fs::metadata(&context.path)
+                .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+            let modified = metadata.modified().unwrap_or(SystemTime::now());
+            Self::fill_file_info(file_info, false, metadata.len(), modified);
+        }
+        Ok(())
+    }
+
+    fn set_basic_info(
+        &self,
+        context: &Self::FileContext,
+        file_attributes: u32,
+        creation_time: u64,
+        last_access_time: u64,
+        last_write_time: u64,
+        last_change_time: u64,
+        file_info: &mut FileInfo,
+    ) -> Result<()> {
+        let _ = (file_attributes, creation_time, last_access_time, last_write_time, last_change_time);
+        let metadata = std::fs::metadata(&context.path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        Self::fill_file_info(file_info, context.is_dir, metadata.len(), modified);
+        Ok(())
+    }
+
     fn flush(&self, context: Option<&Self::FileContext>, file_info: &mut FileInfo) -> Result<()> {
         let Some(ctx) = context else {
             return Ok(());
@@ -189,6 +292,9 @@ impl FileSystemContext for WinFspVfsHost {
     }
 
     fn get_file_info(&self, context: &Self::FileContext, file_info: &mut FileInfo) -> Result<()> {
+        if context.path.to_string_lossy().contains("KItem.cpp") {
+            debug!("get_file_info: path={} is_dir={}", context.path.display(), context.is_dir);
+        }
         let metadata = std::fs::metadata(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND)?;
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
@@ -308,8 +414,13 @@ impl FileSystemContext for WinFspVfsHost {
                 }
                 continue;
             }
+            let entry_name = entry.name.to_string_lossy();
+            if entry_name == "KItem.cpp" {
+                debug!("read_dir entry: name={} is_dir={} size={} mtime={:?}",
+                    entry_name, entry.is_dir, entry.size, entry.modified);
+            }
             let mtime = Self::file_time(entry.modified);
-            if add_entry(&entry.name.to_string_lossy(), entry.is_dir, entry.size, mtime).is_none() {
+            if add_entry(&entry_name, entry.is_dir, entry.size, mtime).is_none() {
                 break;
             }
         }
