@@ -1,8 +1,8 @@
-#[cfg(feature = "mount")]
+#[cfg(target_os = "linux")]
 pub mod fuse_host;
 
-#[cfg(feature = "mount")]
+#[cfg(target_os = "linux")]
 pub use fuse_host::FuseVfsHost;
 
-#[cfg(feature = "mount")]
+#[cfg(target_os = "linux")]
 pub use fuse_host::run;

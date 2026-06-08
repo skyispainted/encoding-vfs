@@ -83,9 +83,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build release
-        run: |
-          cargo build --release
-          cargo build --release --package encoding-vfs-linux --features mount
+        run: cargo build --release --features mount
 
       - name: Package binary
         run: |
