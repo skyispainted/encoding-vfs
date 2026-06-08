@@ -1,10 +1,10 @@
 # encoding-vfs
 
-Transparent virtual filesystem that automatically converts legacy-encoded files to UTF-8 on read, and converts UTF-8 back to the original encoding on write. Mounts as a virtual drive so that any application — including Claude Code, VS Code, or `type` — sees clean UTF-8 content without needing any special configuration.
+Transparent virtual filesystem that automatically converts legacy-encoded files to UTF-8 on read, and converts UTF-8 back to the original encoding on write. Mounts as a virtual drive so that any application — including Claude Code, VS Code, or `cat` — sees clean UTF-8 content without needing any special configuration.
 
 ## Problem
 
-Claude Code (and most modern tools) expect files to be UTF-8. Legacy projects often contain GBK, Shift_JIS, Big5, or other encoded source files, which render as garbled characters or replacement characters. This project solves the problem at the **system level** — no IDE plugins, no file-in-place conversion, no manual intervention.
+Modern tools expect UTF-8. Legacy projects often contain GBK, Shift_JIS, Big5, or other encoded source files, which render as garbled characters or replacement characters. This project solves the problem at the **system level** — no IDE plugins, no file-in-place conversion, no manual intervention.
 
 ## Architecture
 
@@ -22,7 +22,9 @@ Claude Code (and most modern tools) expect files to be UTF-8. Legacy projects of
 └───────────────────────────────────────────────┘
 ```
 
-## Quick Start (Windows)
+---
+
+## Windows (WinFsp)
 
 ### Prerequisites
 
@@ -77,23 +79,91 @@ Two methods, both graceful:
 net use Y: /delete /y
 ```
 
+---
+
+## Linux (FUSE)
+
+### Prerequisites
+
+#### 1. Install FUSE3 and build dependencies
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install -y libfuse3-dev pkg-config
+```
+
+**Fedora:**
+```bash
+sudo dnf install -y fuse3-devel pkg-config
+```
+
+**Arch:**
+```bash
+sudo pacman -S fuse3 pkg-config
+```
+
+#### 2. Install Rust toolchain
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+```
+
+### Build
+
+```bash
+cargo build --release
+```
+
+### Run
+
+```bash
+# Mount FUSE filesystem at /mnt/gbk-vfs
+./target/release/encoding-vfs -b /path/to/legacy-project -m /mnt/gbk-vfs
+```
+
+All read/write to `/mnt/gbk-vfs/` will be transparently converted between the source encoding and UTF-8.
+
+### Unmount
+
+```bash
+# Method 1: press Ctrl+C in the terminal (auto-unmount)
+
+# Method 2: from another terminal
+fusermount3 -u /mnt/gbk-vfs
+# or: fusermount -u /mnt/gbk-vfs  (older systems)
+```
+
+### Troubleshooting
+
+**"option allow_other only allowed if 'user_allow_other' is set in /etc/fuse.conf"**
+
+Uncomment the line in `/etc/fuse.conf`:
+```bash
+sudo sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf
+```
+
+---
+
 ## CLI Usage
 
 ```
 encoding-vfs --help
 ```
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-b, --backend-dir <PATH>` | Directory containing original files | `.` |
-| `-d, --drive <LETTER>` | Windows drive letter to mount | `X` |
-| `-s, --source-encoding <ENC>` | Source encoding: `auto`, `GBK`, `Shift_JIS`, `Big5`, etc. | `auto` |
-| `-t, --target-encoding <ENC>` | Target encoding presented to applications | `UTF-8` |
-| `-L, --log-level <LEVEL>` | Log level: trace, debug, info, warn, error | `info` |
-| `-c, --config <FILE>` | Optional TOML config file | — |
+| Flag | Description | Default (Win) | Default (Linux) |
+|------|-------------|---------------|-----------------|
+| `-b, --backend <PATH>` | Backend directory with original files | `.` | `.` |
+| `-d, --drive <LETTER>` | Windows drive letter to mount | `X` | — |
+| `-m, --mount <PATH>` | Linux FUSE mount point | — | `/mnt/gbk-vfs` |
+| `-s, --source-encoding <ENC>` | Source encoding: `auto`, `GBK`, `Shift_JIS`, `Big5`, etc. | `auto` | `auto` |
+| `-t, --target-encoding <ENC>` | Target encoding presented to applications | `UTF-8` | `UTF-8` |
+| `-L, --log-level <LEVEL>` | Log level: trace, debug, info, warn, error | `info` | `info` |
+| `-c, --config <FILE>` | Optional TOML config file | — | — |
 
 ### Examples
 
+**Windows:**
 ```powershell
 # Basic mount: auto-detect source encoding → UTF-8
 encoding-vfs.exe -b C:\legacy-project -d X
@@ -106,6 +176,21 @@ encoding-vfs.exe -b C:\big5-project -d X -s Big5
 
 # With config file (CLI overrides config values)
 encoding-vfs.exe -b C:\legacy-project -d X -c encoding-vfs.toml
+
+# CLI overrides config file
+encoding-vfs.exe -b C:\legacy-project -d X -c config.toml -s Big5
+```
+
+**Linux:**
+```bash
+# Basic mount
+./encoding-vfs -b /home/user/legacy-project -m /mnt/gbk-vfs
+
+# Fixed source encoding
+./encoding-vfs -b /home/user/sjis-project -m /mnt/gbk-vfs -s Shift_JIS
+
+# With config file
+./encoding-vfs -b /home/user/legacy-project -m /mnt/gbk-vfs -c encoding-vfs.toml
 ```
 
 ## Configuration
@@ -114,10 +199,12 @@ Create `encoding-vfs.toml`:
 
 ```toml
 [backend]
-backend_dir = "C:\\projects\\original"
+backend_dir = "C:\\projects\\original"   # Windows
+# backend_dir = "/home/user/legacy-project"  # Linux
 
 [mount]
-drive_letter = "X"
+drive_letter = "X"       # Windows: drive letter
+# mount_point = "/mnt/gbk-vfs"  # Linux: mount point (optional)
 
 [encoding]
 source_encoding = "auto"        # "auto" | "GBK" | "Shift_JIS" | "Big5" | ...
@@ -137,6 +224,7 @@ level = "info"
 |---------|-----|-------------|---------|
 | `backend` | `backend_dir` | Directory containing original files | `.` |
 | `mount` | `drive_letter` | Windows drive letter | `X` |
+| `mount` | `mount_point` | Linux FUSE mount point | `/mnt/gbk-vfs` |
 | `encoding` | `source_encoding` | Source encoding (`auto` for detection) | `auto` |
 | `encoding` | `target_encoding` | Target encoding presented to apps | `UTF-8` |
 | `encoding` | `default_encoding` | Fallback when auto-detect fails | `GBK` |
@@ -147,13 +235,13 @@ level = "info"
 
 ## How It Works
 
-### Read Path (source → UTF-8)
+### Read Path (source → target)
 
 ```
-Application reads Y:\file.c
+Application reads mounted file
        │
        ▼
-WinFsp callback → vfs.read_file()
+Platform callback (WinFsp/FUSE) → vfs.read_file()
        │
        ├── Read raw bytes from backend (e.g. GBK)
        ├── Detect encoding (BOM + content heuristic, cached)
@@ -163,13 +251,13 @@ WinFsp callback → vfs.read_file()
        └── Return target encoding bytes to application
 ```
 
-### Write Path (UTF-8 → source)
+### Write Path (target → source)
 
 ```
-Application writes Y:\file.c (UTF-8)
+Application writes mounted file (target encoding, e.g. UTF-8)
        │
        ▼
-WinFsp callback → vfs.write_file()
+Platform callback (WinFsp/FUSE) → vfs.write_file()
        │
        ├── Detect existing file encoding (cached)
        ├── Convert target → source encoding
@@ -190,7 +278,7 @@ GBK, CP936, GB2312, GB18030, UTF-8, UTF-16LE, UTF-16BE, Big5, EUC-JP, EUC-KR, Sh
 ## Project Structure
 
 ```
-C:\projects\file-io-proxy\
+encoding-vfs/
 ├── Cargo.toml                          # workspace root
 ├── encoding-vfs-core/                  # platform-agnostic core
 │   ├── Cargo.toml
@@ -206,20 +294,18 @@ C:\projects\file-io-proxy\
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs                      # feature-gated exports
-│       └── winfsp_host.rs             # FileSystemContext trait + run()
-├── encoding-vfs-linux/                 # Linux FUSE adapter (stub)
+│       └── winfsp_host.rs              # FileSystemContext trait + run()
+├── encoding-vfs-linux/                 # Linux FUSE adapter
 │   ├── Cargo.toml
 │   └── src/
-│       └── lib.rs                      # placeholder
+│       ├── lib.rs                      # public exports
+│       └── fuse_host.rs                # fuser::Filesystem trait + run()
 ├── encoding-vfs-cli/                   # unified CLI entry point
 │   ├── Cargo.toml
 │   └── src/
-│       ├── main.rs                     # clap → platform dispatch
-│       └── test_drive.rs              # drive accessibility tests
-└── encoding-vfs-test/                  # integration test harness
-    ├── Cargo.toml
-    └── src/
-        └── main.rs                     # end-to-end verification
+│       └── main.rs                     # clap → platform dispatch
+└── .github/workflows/
+    └── release.yml                     # CI build + release for Win + Linux
 ```
 
 ## Build Details
@@ -229,8 +315,17 @@ C:\projects\file-io-proxy\
 | Crate | Role | Key Dependencies |
 |-------|------|-----------------|
 | `encoding-vfs-core` | Encoding detection, conversion, cache, VFS | `encoding_rs`, `encoding_rs_io`, `dashmap`, `toml`, `serde`, `thiserror`, `tracing` |
-| `encoding-vfs-windows` | WinFsp 2.1 virtual drive mount | `winfsp 0.12.6+winfsp-2.1`, `widestring 1.0`, `windows 0.61`, `encoding-vfs-core` |
-| `encoding-vfs-cli` | CLI binary, platform dispatch | `clap 4.4`, `tracing-subscriber`, platform crates |
+| `encoding-vfs-windows` | WinFsp 2.1 virtual drive mount | `winfsp 0.12`, `widestring 1.0`, `windows 0.61`, `encoding-vfs-core` |
+| `encoding-vfs-linux` | Linux FUSE filesystem mount | `fuser 0.14`, `libc 0.2`, `encoding-vfs-core` |
+| `encoding-vfs-cli` | Unified CLI binary, platform dispatch | `clap 4.4`, `tracing-subscriber`, platform crates |
+
+### Feature Flags
+
+| Feature | Platform | Description |
+|---------|----------|-------------|
+| `mount` | Windows | Enable WinFsp virtual drive mount (requires `--features mount`) |
+
+On Linux, the FUSE adapter is always included (no feature flag needed).
 
 ### WinFsp Notes
 
@@ -239,3 +334,23 @@ C:\projects\file-io-proxy\
 - SxS (side-by-side) installation supported for custom builds with unique driver names
 - Security: returns null security descriptor, letting WinFsp apply defaults
 - Tested: directory listing, file creation, read, write all verified working
+
+### FUSE Notes
+
+- Uses **fuser** crate (v0.14) with `Filesystem` trait
+- Requires `libfuse3-dev` and `pkg-config` at build time
+- Runtime requires `/dev/fuse` device and `fusermount`/`fusermount3`
+- If other users need access, uncomment `user_allow_other` in `/etc/fuse.conf`
+
+## CI / Release
+
+Push a tag to trigger automated builds:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+This creates draft releases on GitHub:
+- `encoding-vfs-Windows-x64-v0.1.0.zip` — binary + WinFsp DLL + README
+- `encoding-vfs-Linux-x64-v0.1.0.tar.gz` — binary + README

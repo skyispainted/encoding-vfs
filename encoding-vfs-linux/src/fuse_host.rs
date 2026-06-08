@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use encoding_vfs_core::vfs::EncodingVfs;
 use fuser::{
@@ -12,14 +11,15 @@ use fuser::{
 };
 use tracing::{debug, warn};
 
-const TTL_SEC: f64 = 1.0;
+fn ttl() -> Duration {
+    Duration::from_secs(1)
+}
 
 fn make_attr(path: &Path, is_dir: bool, ino: u64) -> FileAttr {
-    let full = path; // caller passes full path
     let (size, mtime, ctime, atime) = if is_dir {
         (0, SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH)
     } else {
-        match std::fs::metadata(full) {
+        match std::fs::metadata(path) {
             Ok(m) => (
                 m.len(),
                 m.modified().unwrap_or(SystemTime::UNIX_EPOCH),
@@ -45,17 +45,15 @@ fn make_attr(path: &Path, is_dir: bool, ino: u64) -> FileAttr {
         gid: unsafe { libc::getgid() },
         rdev: 0,
         blksize: 512,
+        flags: 0,
     }
 }
 
 /// Shared state protected by a single mutex.
 struct Inner {
-    /// ino -> full backend path
     ino_map: HashMap<u64, PathBuf>,
-    /// full backend path -> ino
     path_map: HashMap<PathBuf, u64>,
     next_ino: u64,
-    /// fh -> (full_path, is_dir)
     handles: HashMap<u64, (PathBuf, bool)>,
     next_fh: u64,
 }
@@ -147,10 +145,10 @@ impl Filesystem for FuseVfsHost {
         let is_dir = child_path.is_dir();
         let ino = inner.insert(child_path.clone());
         let attr = make_attr(&child_path, is_dir, ino);
-        reply.entry(&TTL_SEC, &attr, 0);
+        reply.entry(&ttl(), &attr, 0);
     }
 
-    fn getattr(&mut self, _req: &Request<'_>, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyAttr) {
         let inner = self.inner.lock().unwrap();
         let Some(path) = inner.lookup_ino(ino) else {
             reply.error(libc::ENOENT);
@@ -159,7 +157,7 @@ impl Filesystem for FuseVfsHost {
 
         let is_dir = path.is_dir();
         let attr = make_attr(&path, is_dir, ino);
-        reply.attr(&TTL_SEC, &attr);
+        reply.attr(&ttl(), &attr);
     }
 
     fn open(&mut self, _req: &Request<'_>, ino: u64, _flags: i32, reply: ReplyOpen) {
@@ -306,7 +304,7 @@ impl Filesystem for FuseVfsHost {
         // ".." entry
         if offset <= 1 {
             let parent_ino = if path == self.vfs.backend_dir {
-                ino // root's .. is itself
+                ino
             } else {
                 let inner = self.inner.lock().unwrap();
                 path.parent()
@@ -331,7 +329,7 @@ impl Filesystem for FuseVfsHost {
                 FileType::RegularFile
             };
             let name = entry.name.to_string_lossy();
-            if reply.add(child_ino, actual_offset, file_type, &name) {
+            if reply.add(child_ino, actual_offset, file_type, name.as_ref()) {
                 break;
             }
         }
@@ -365,7 +363,7 @@ impl Filesystem for FuseVfsHost {
                 let ino = inner.insert(child_path.clone());
                 let fh = inner.alloc_fh(child_path.clone(), false);
                 let attr = make_attr(&child_path, false, ino);
-                reply.created(&TTL_SEC, &attr, 0, fh, 0);
+                reply.created(&ttl(), &attr, 0, fh, 0);
             }
             Err(_) => reply.error(libc::EACCES),
         }
@@ -391,7 +389,7 @@ impl Filesystem for FuseVfsHost {
             Ok(_) => {
                 let ino = inner.insert(child_path.clone());
                 let attr = make_attr(&child_path, true, ino);
-                reply.entry(&TTL_SEC, &attr, 0);
+                reply.entry(&ttl(), &attr, 0);
             }
             Err(_) => reply.error(libc::EACCES),
         }
@@ -446,13 +444,13 @@ impl Filesystem for FuseVfsHost {
             reply.error(libc::ENOENT);
             return;
         };
-        let Some(_to_parent) = inner.lookup_ino(newparent) else {
+        let Some(to_parent) = inner.lookup_ino(newparent) else {
             reply.error(libc::ENOENT);
             return;
         };
 
         let from = from_parent.join(name);
-        let to = inner.lookup_ino(newparent).unwrap().join(newname);
+        let to = to_parent.join(newname);
 
         match std::fs::rename(&from, &to) {
             Ok(_) => {
@@ -547,14 +545,14 @@ impl Filesystem for FuseVfsHost {
 
     fn statfs(&mut self, _req: &Request<'_>, _ino: u64, reply: ReplyStatfs) {
         reply.statfs(
-            1_099_511_627_776, // total blocks
-            549_755_813_888,   // free blocks
-            549_755_813_888,   // available blocks
-            0,                 // total inodes
-            0,                 // free inodes
-            512,               // bsize
-            255,               // namemax
-            0,                 // frsize
+            1_099_511_627_776,
+            549_755_813_888,
+            549_755_813_888,
+            0,
+            0,
+            512,
+            255,
+            0,
         );
     }
 }
@@ -563,20 +561,28 @@ impl Filesystem for FuseVfsHost {
 pub fn run(host: FuseVfsHost, mount_point: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mp = PathBuf::from(mount_point);
 
+    eprintln!("Creating mount point: {:?}", mp);
     if !mp.exists() {
-        std::fs::create_dir_all(&mp)?;
+        eprintln!("Creating directory: {:?}", mp);
+        std::fs::create_dir_all(&mp).map_err(|e| {
+            eprintln!("create_dir_all failed: {:?}", e);
+            e
+        })?;
     }
 
-    debug!("Starting FUSE Encoding VFS on mount point: {}", mount_point);
-    debug!("Backend directory: {:?}", host.vfs.backend_dir);
-    debug!("Default encoding: {}", host.vfs.encoding_config.default_encoding);
+    eprintln!("Mounting FUSE on: {}", mount_point);
+    eprintln!("Backend: {:?}", host.vfs.backend_dir);
 
     let options = vec![
         MountOption::FSName("EncodingVFS".to_string()),
-        MountOption::AutoUnmount,
     ];
 
-    fuser::mount2(host, &mp, &options)?;
+    fuser::mount2(host, &mp, &options).map_err(|e| {
+        eprintln!("FUSE mount2 failed: {:?}", e);
+        e
+    })?;
+
+    eprintln!("FUSE mounted successfully");
 
     Ok(())
 }

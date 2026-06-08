@@ -1,6 +1,5 @@
 use clap::Parser;
 use std::path::PathBuf;
-#[allow(unused_imports)]
 use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
