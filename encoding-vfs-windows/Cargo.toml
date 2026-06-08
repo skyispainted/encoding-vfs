@@ -1,0 +1,18 @@
+[package]
+name = "encoding-vfs-windows"
+version = "0.1.0"
+edition = "2021"
+description = "WinFsp adapter for encoding-vfs: mounts GBK files as UTF-8 virtual drive"
+build = "build.rs"
+
+[features]
+# Requires WinFsp runtime installed (winget install WinFsp.WinFsp or MSI)
+mount = ["winfsp/debug", "winfsp", "windows"]
+
+[dependencies]
+encoding-vfs-core = { path = "../encoding-vfs-core" }
+winfsp = { version = "0.12", optional = true }
+widestring = { version = "1.0", optional = true }
+windows = { version = "0.61", features = ["Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading"], optional = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

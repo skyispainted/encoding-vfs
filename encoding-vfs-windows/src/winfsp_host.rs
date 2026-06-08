@@ -1,0 +1,416 @@
+use std::ffi::c_void;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use encoding_vfs_core::vfs::EncodingVfs;
+use tracing::{debug, info, warn};
+use winfsp::{
+    U16CStr, Result,
+    filesystem::{
+        DirInfo, DirMarker, FileInfo, FileSystemContext, FileSecurity, OpenFileInfo, VolumeInfo,
+        WideNameInfo,
+    },
+    host::{FileSystemHost, FileSystemParams, OperationGuardStrategy, VolumeParams},
+};
+
+/// File context that stores the path and whether it's a directory.
+pub struct FileContext {
+    path: PathBuf,
+    is_dir: bool,
+}
+
+/// WinFsp adapter that implements the virtual filesystem operations.
+pub struct WinFspVfsHost {
+    vfs: EncodingVfs,
+}
+
+impl WinFspVfsHost {
+    pub fn new(vfs: EncodingVfs) -> Self {
+        Self { vfs }
+    }
+
+    fn rel_path<'a>(&self, full: &'a PathBuf) -> &'a std::path::Path {
+        full.strip_prefix(&self.vfs.backend_dir).unwrap_or(full)
+    }
+
+    fn resolve_path(&self, name: &str) -> PathBuf {
+        let trimmed = name.trim_start_matches('\\');
+        if trimmed.is_empty() {
+            self.vfs.backend_dir.clone()
+        } else {
+            self.vfs.backend_dir.join(trimmed)
+        }
+    }
+
+    fn file_time(system_time: SystemTime) -> u64 {
+        system_time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    }
+
+    fn file_attributes(is_dir: bool) -> u32 {
+        if is_dir { 0x10 } else { 0x80 }
+    }
+
+    fn fill_file_info(fi: &mut FileInfo, is_dir: bool, size: u64, modified: SystemTime) {
+        let mtime = Self::file_time(modified);
+        fi.file_attributes = Self::file_attributes(is_dir);
+        fi.file_size = size;
+        fi.allocation_size = size;
+        fi.last_write_time = mtime;
+        fi.last_access_time = mtime;
+        fi.creation_time = mtime;
+        fi.change_time = mtime;
+        fi.index_number = 0;
+        fi.hard_links = 0;
+        fi.reparse_tag = 0;
+    }
+}
+
+impl FileSystemContext for WinFspVfsHost {
+    type FileContext = Arc<FileContext>;
+
+    fn get_security_by_name(
+        &self,
+        file_name: &U16CStr,
+        security_descriptor: Option<&mut [c_void]>,
+        _reparse_point_resolver: impl FnOnce(&U16CStr) -> Option<FileSecurity>,
+    ) -> Result<FileSecurity> {
+        let name = file_name.to_string_lossy();
+        let full_path = self.resolve_path(&name);
+
+        if !full_path.exists() {
+            return Err(windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND.into());
+        }
+
+        let is_dir = full_path.is_dir();
+        let attrs = Self::file_attributes(is_dir);
+
+        // Return no security descriptor; let WinFsp use defaults.
+        Ok(FileSecurity {
+            reparse: false,
+            sz_security_descriptor: 0,
+            attributes: attrs,
+        })
+    }
+
+    fn open(
+        &self,
+        file_name: &U16CStr,
+        create_options: u32,
+        _granted_access: u32,
+        file_info: &mut OpenFileInfo,
+    ) -> Result<Self::FileContext> {
+        const FILE_DIRECTORY_FILE: u32 = 0x00000001;
+
+        let name = file_name.to_string_lossy();
+        let full_path = self.resolve_path(&name);
+
+        if !full_path.exists() {
+            return Err(windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND.into());
+        }
+
+        let is_dir = full_path.is_dir();
+        let is_dir_requested = create_options & FILE_DIRECTORY_FILE != 0;
+
+        // Only reject if a directory was explicitly requested but the target is not one.
+        // Allow opening a directory without FILE_DIRECTORY_FILE (common with
+        // FILE_FLAG_BACKUP_SEMANTICS for handle-based operations).
+        if is_dir_requested && !is_dir {
+            return Err(windows::Win32::Foundation::STATUS_NOT_A_DIRECTORY.into());
+        }
+
+        let metadata = std::fs::metadata(&full_path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+        let size = metadata.len();
+        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+
+        Self::fill_file_info(file_info.as_mut(), is_dir, size, modified);
+
+        Ok(Arc::new(FileContext {
+            path: full_path,
+            is_dir,
+        }))
+    }
+
+    fn close(&self, _context: Self::FileContext) {}
+
+    fn create(
+        &self,
+        file_name: &U16CStr,
+        create_options: u32,
+        _granted_access: u32,
+        _file_attributes: u32,
+        _security_descriptor: Option<&[c_void]>,
+        _allocation_size: u64,
+        _extra_buffer: Option<&[u8]>,
+        _extra_buffer_is_reparse_point: bool,
+        file_info: &mut OpenFileInfo,
+    ) -> Result<Self::FileContext> {
+        const FILE_DIRECTORY_FILE: u32 = 0x00000001;
+
+        let full_path = self.resolve_path(&file_name.to_string_lossy());
+        let is_dir = create_options & FILE_DIRECTORY_FILE != 0;
+
+        if is_dir {
+            std::fs::create_dir_all(&full_path)
+                .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+        } else {
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+            }
+            std::fs::File::create(&full_path)
+                .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+        }
+
+        Self::fill_file_info(file_info.as_mut(), is_dir, 0, SystemTime::now());
+
+        Ok(Arc::new(FileContext {
+            path: full_path.clone(),
+            is_dir,
+        }))
+    }
+
+    fn cleanup(&self, _context: &Self::FileContext, _file_name: Option<&U16CStr>, _flags: u32) {}
+
+    fn flush(&self, context: Option<&Self::FileContext>, file_info: &mut FileInfo) -> Result<()> {
+        let Some(ctx) = context else {
+            return Ok(());
+        };
+        let metadata = std::fs::metadata(&ctx.path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        Self::fill_file_info(file_info, ctx.is_dir, metadata.len(), modified);
+        Ok(())
+    }
+
+    fn get_file_info(&self, context: &Self::FileContext, file_info: &mut FileInfo) -> Result<()> {
+        let metadata = std::fs::metadata(&context.path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND)?;
+        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        let created = metadata.created().unwrap_or(SystemTime::UNIX_EPOCH);
+        let accessed = metadata.accessed().unwrap_or(SystemTime::UNIX_EPOCH);
+        Self::fill_file_info(file_info, context.is_dir, metadata.len(), modified);
+        file_info.creation_time = Self::file_time(created);
+        file_info.last_access_time = Self::file_time(accessed);
+        Ok(())
+    }
+
+    fn get_security(
+        &self,
+        _context: &Self::FileContext,
+        _security_descriptor: Option<&mut [c_void]>,
+    ) -> Result<u64> {
+        // Return no security descriptor; let WinFsp use defaults.
+        Ok(0)
+    }
+
+    fn read(&self, context: &Self::FileContext, buffer: &mut [u8], offset: u64) -> Result<u32> {
+        if context.is_dir {
+            return Err(windows::Win32::Foundation::STATUS_FILE_IS_A_DIRECTORY.into());
+        }
+
+        let rel = self.rel_path(&context.path);
+        match self.vfs.read_file(rel, offset, buffer.len()) {
+            Ok(data) => {
+                let len = data.len().min(buffer.len());
+                buffer[..len].copy_from_slice(&data[..len]);
+                Ok(len as u32)
+            }
+            Err(e) => {
+                warn!(error = %e, path = ?rel, "read failed");
+                Err(windows::Win32::Foundation::STATUS_ACCESS_DENIED.into())
+            }
+        }
+    }
+
+    fn write(
+        &self,
+        context: &Self::FileContext,
+        buffer: &[u8],
+        offset: u64,
+        _write_to_eof: bool,
+        _constrained_io: bool,
+        file_info: &mut FileInfo,
+    ) -> Result<u32> {
+        if context.is_dir {
+            return Err(windows::Win32::Foundation::STATUS_FILE_IS_A_DIRECTORY.into());
+        }
+
+        let rel = self.rel_path(&context.path);
+        match self.vfs.write_file(rel, offset, buffer) {
+            Ok(written) => {
+                let metadata = std::fs::metadata(&context.path)
+                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+                let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                Self::fill_file_info(file_info, false, metadata.len(), modified);
+                Ok(written as u32)
+            }
+            Err(e) => {
+                warn!(error = %e, path = ?rel, "write failed");
+                Err(windows::Win32::Foundation::STATUS_ACCESS_DENIED.into())
+            }
+        }
+    }
+
+    fn read_directory(
+        &self,
+        context: &Self::FileContext,
+        _pattern: Option<&U16CStr>,
+        _marker: DirMarker,
+        buffer: &mut [u8],
+    ) -> Result<u32> {
+        if !context.is_dir {
+            return Err(windows::Win32::Foundation::STATUS_NOT_A_DIRECTORY.into());
+        }
+
+        let rel = self.rel_path(&context.path);
+        let entries = self
+            .vfs
+            .read_dir(rel)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+
+        let mut cursor: u32 = 0;
+
+        let mut add_entry = |name: &str, is_dir: bool, size: u64, mtime: u64| -> Option<()> {
+            let mut di = DirInfo::<255>::new();
+            di.file_info_mut().file_attributes = Self::file_attributes(is_dir);
+            di.file_info_mut().file_size = size;
+            di.file_info_mut().allocation_size = size;
+            di.file_info_mut().last_write_time = mtime;
+            di.file_info_mut().last_access_time = mtime;
+            di.file_info_mut().creation_time = mtime;
+            di.file_info_mut().change_time = mtime;
+            di.set_name(name).ok()?;
+            di.append_to_buffer(buffer, &mut cursor).then_some(())
+        };
+
+        let epoch = Self::file_time(SystemTime::UNIX_EPOCH);
+
+        add_entry(".", true, 0, epoch);
+        add_entry("..", true, 0, epoch);
+
+        for entry in entries {
+            let mtime = Self::file_time(entry.modified);
+            if add_entry(&entry.name.to_string_lossy(), entry.is_dir, entry.size, mtime).is_none() {
+                break;
+            }
+        }
+
+        DirInfo::<255>::finalize_buffer(buffer, &mut cursor);
+        Ok(cursor)
+    }
+
+    fn rename(
+        &self,
+        _context: &Self::FileContext,
+        file_name: &U16CStr,
+        new_file_name: &U16CStr,
+        _replace_if_exists: bool,
+    ) -> Result<()> {
+        let from = self.resolve_path(&file_name.to_string_lossy());
+        let to = self.resolve_path(&new_file_name.to_string_lossy());
+
+        if !from.exists() {
+            return Err(windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND.into());
+        }
+
+        std::fs::rename(&from, &to)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED.into())
+    }
+
+    fn set_delete(
+        &self,
+        context: &Self::FileContext,
+        _file_name: &U16CStr,
+        delete_file: bool,
+    ) -> Result<()> {
+        if delete_file {
+            if context.is_dir {
+                std::fs::remove_dir_all(&context.path)
+                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+            } else {
+                std::fs::remove_file(&context.path)
+                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn get_volume_info(&self, out_volume_info: &mut VolumeInfo) -> Result<()> {
+        info!("get_volume_info called");
+        out_volume_info.total_size = 1_099_511_627_776;
+        out_volume_info.free_size = 549_755_813_888;
+        out_volume_info.set_volume_label("EncodingVFS");
+        info!("get_volume_info -> ok");
+        Ok(())
+    }
+}
+
+/// Start the WinFsp virtual filesystem.
+pub fn run(host: WinFspVfsHost, drive_letter: char) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    info!("Starting WinFsp Encoding VFS on drive {}:", drive_letter);
+    info!("Backend directory: {:?}", host.vfs.backend_dir);
+    info!("Default encoding: {}", host.vfs.encoding_config.default_encoding);
+
+    let mut vp = VolumeParams::new();
+    vp.sector_size(512);
+    vp.sectors_per_allocation_unit(8);
+    vp.case_sensitive_search(false);
+    vp.case_preserved_names(true);
+    vp.unicode_on_disk(true);
+    vp.volume_info_timeout(1000);
+    vp.filesystem_name("EncodingVFS");
+
+    let options = FileSystemParams {
+        use_dir_info_by_name: false,
+        volume_params: vp,
+        guard_strategy: OperationGuardStrategy::Coarse,
+        debug_mode: Default::default(),
+    };
+
+    let mut fs = FileSystemHost::new_with_options(options, host)?;
+
+    let mount_str = format!("{}:", drive_letter);
+    fs.mount(&mount_str)?;
+    fs.start()?;
+
+    info!("Encoding VFS mounted on {}:", drive_letter);
+    info!("Press Ctrl+C to unmount and exit.");
+
+    static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "system" fn console_handler(ctrl_type: u32) -> i32 {
+        if ctrl_type == 0 || ctrl_type == 2 {
+            SHUTDOWN.store(true, Ordering::SeqCst);
+            1
+        } else {
+            0
+        }
+    }
+
+    unsafe {
+        let handler: unsafe extern "system" fn(u32) -> i32 = console_handler;
+        windows::Win32::System::Console::SetConsoleCtrlHandler(
+            Some(std::mem::transmute(handler)),
+            true,
+        )?;
+    }
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if SHUTDOWN.load(Ordering::SeqCst) {
+            info!("Shutdown signal received");
+            break;
+        }
+    }
+
+    fs.unmount();
+    fs.stop();
+    info!("Encoding VFS unmounted from {}:", drive_letter);
+    Ok(())
+}

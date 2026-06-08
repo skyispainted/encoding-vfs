@@ -1,0 +1,24 @@
+[package]
+name = "encoding-vfs-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI entry point for encoding-vfs: cross-platform GBK <-> UTF-8 transparent VFS"
+
+[[bin]]
+name = "encoding-vfs"
+path = "src/main.rs"
+
+[features]
+# Enable WinFsp virtual drive mount support (requires WinFsp runtime installed)
+mount = ["encoding-vfs-windows/mount"]
+
+[dependencies]
+encoding-vfs-core = { path = "../encoding-vfs-core" }
+encoding-vfs-windows = { path = "../encoding-vfs-windows" }
+clap = { version = "=4.4.11", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# TODO: Add Linux FUSE support when building on Linux
+# [target.'cfg(target_os = "linux")'.dependencies]
+# encoding-vfs-linux = { path = "../encoding-vfs-linux" }

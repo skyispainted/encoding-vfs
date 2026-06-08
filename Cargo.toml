@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "encoding-vfs-core",
+    "encoding-vfs-cli",
+    "encoding-vfs-windows",
+]
+resolver = "2"
