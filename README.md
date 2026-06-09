@@ -47,13 +47,17 @@ Get-Service WinFsp.Launcher
 # Should show Status: Running
 ```
 
-#### 2. Install Rust toolchain
+### Quick Start — Prebuilt Binary
+
+Download the latest release from [Releases](https://github.com/skyispainted/encoding-vfs/releases):
 
 ```powershell
-rustup toolchain install stable
+# Download encoding-vfs-Windows-x64-vX.Y.Z.zip, extract to a directory
+# Run directly:
+.\encoding-vfs.exe -b C:\projects\original -d X
 ```
 
-### Build
+### Build from Source
 
 ```powershell
 cargo build --release --features mount
@@ -85,31 +89,44 @@ net use Y: /delete /y
 
 ### Prerequisites
 
-#### 1. Install FUSE3 and build dependencies
+#### Install FUSE3 runtime (required at runtime)
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install -y libfuse3-2 fuse3
+```
+
+**Fedora:**
+```bash
+sudo dnf install -y fuse3
+```
+
+**Arch:**
+```bash
+sudo pacman -S fuse3
+```
+
+### Quick Start — Prebuilt Binary
+
+Download the latest release from [Releases](https://github.com/skyispainted/encoding-vfs/releases):
+
+```bash
+# Download and extract
+tar xzf encoding-vfs-Linux-x64-vX.Y.Z.tar.gz
+cd encoding-vfs-Linux-x64-vX.Y.Z
+
+# Run directly:
+./encoding-vfs -b /home/user/legacy-project -m /mnt/gbk-vfs
+```
+
+### Build from Source
+
+Prerequisites for building:
 
 **Ubuntu/Debian:**
 ```bash
 sudo apt-get install -y libfuse3-dev pkg-config
 ```
-
-**Fedora:**
-```bash
-sudo dnf install -y fuse3-devel pkg-config
-```
-
-**Arch:**
-```bash
-sudo pacman -S fuse3 pkg-config
-```
-
-#### 2. Install Rust toolchain
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
-```
-
-### Build
 
 ```bash
 cargo build --release
