@@ -10,7 +10,7 @@ use crate::config::EncodingConfig;
 use crate::detector::detect_encoding;
 use crate::encoding::{get_encoding, from_encoding, to_encoding};
 use crate::error::VfsError;
-use crate::filter::{VfsFilter, FilterMode};
+use crate::filter::VfsFilter;
 
 /// File information returned by get_file_info
 #[derive(Debug)]
@@ -72,19 +72,10 @@ impl EncodingVfs {
             encoding_config.cache_ttl_seconds,
         );
 
-        // Build filter: look for .encodingvfs-filter in backend_dir, merge with inline rules
-        let filter_path = backend_dir.join(".encodingvfs-filter");
+        let filter_path = backend_dir.join(".evfsignore");
         let filter = match &encoding_config.filter {
-            Some(fc) => VfsFilter::new(
-                Some(&filter_path),
-                &fc.rules,
-                fc.mode,
-            ),
-            None => VfsFilter::new(
-                Some(&filter_path),
-                &[],
-                FilterMode::Blacklist,
-            ),
+            Some(fc) => VfsFilter::new(Some(&filter_path), &fc.rules),
+            None => VfsFilter::new(Some(&filter_path), &[]),
         };
 
         Ok(Self {
@@ -328,11 +319,6 @@ impl EncodingVfs {
                         "failed to read metadata",
                     )))),
                 };
-                // Build relative path for filter check
-                let child_rel = rel_path.join(e.file_name());
-                if self.filter.is_ignored(&child_rel) {
-                    return None;
-                }
                 Some(Ok(DirEntry {
                     name: e.file_name(),
                     is_dir: metadata.is_dir(),

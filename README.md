@@ -179,8 +179,7 @@ cache_max_entries = 10000
 cache_ttl_seconds = 3600
 
 [encoding.filter]
-mode = "blacklist"
-rules = ["*.dll", "build/"]
+rules = ["@passthrough *.dll", "@passthrough *.exe"]
 
 [log]
 level = "info"
@@ -199,8 +198,7 @@ level = "info"
 | `encoding` | `detect_sample_bytes` | Bytes read for encoding detection | `8192` |
 | `encoding` | `cache_max_entries` | Max encoding cache entries (LRU) | `10000` |
 | `encoding` | `cache_ttl_seconds` | Cache entry TTL in seconds | `3600` |
-| `encoding.filter` | `mode` | `"blacklist"` (all visible) or `"whitelist"` (all hidden) | `blacklist` |
-| `encoding.filter` | `rules` | Inline glob rules (same format as `.encodingvfs-filter` file) | `[]` |
+| `encoding.filter` | `rules` | Inline rules for `@passthrough` patterns | `[]` |
 | `log` | `level` | Log verbosity | `info` |
 
 ### Encoding Presets
@@ -244,82 +242,40 @@ encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
 
 ## Filter
 
-Control which files are visible, hidden, or bypass encoding conversion in the mounted drive.
+Control which files bypass encoding conversion in the mounted drive.
+All files are always visible — the only distinction is whether encoding conversion applies.
 
 ### Sources (merged)
 
-1. **`.encodingvfs-filter`** — place in backend directory root
+1. **`.evfsignore`** — place in backend directory root
 2. **`[encoding.filter] rules`** — inline in TOML config
 
 File rules load first, config rules append.
-
-### Modes
-
-**Blacklist (default)** — all visible, rules hide or bypass:
-
-```
-# .encodingvfs-filter
-# Hide
-*.dll
-build/
-.git/
-
-# Bypass encoding, return raw bytes
-@passthrough *.png
-@passthrough *.jpg
-```
-
-**Whitelist** — all hidden, only `@allow` makes visible:
-
-```
-# .encodingvfs-filter
-# Show only C/C++ sources
-@allow *.h
-@allow *.cpp
-
-# But hide tests
-src/test/
-```
 
 ### Rule Syntax
 
 | Rule | Effect | Example |
 |------|--------|---------|
-| `*.ext` | Hide matching files | `*.dll`, `*.bin` |
-| `dir/` | Hide directory tree | `build/`, `.git/` |
-| `**/*.tmp` | Recursive glob | hides all `.tmp` recursively |
 | `@passthrough pattern` | Skip encoding, return raw bytes | `@passthrough *.png` |
-| `@allow pattern` | Make visible (whitelist mode) | `@allow *.cpp` |
 
-### Evaluation Order
+All files not matching `@passthrough` will be encoded normally.
 
-1. `@passthrough` — highest priority, both modes
-2. Ignore globs — hide matching files
-3. `@allow` — visible (whitelist only)
-4. Default — visible (blacklist) / hidden (whitelist)
+### Config Example
 
-### Config Examples
+**Skip binary assets, convert everything else:**
 
-**Only convert `.h`/`.cpp`, hide rest:**
-
-```toml
-[encoding.filter]
-mode = "whitelist"
-rules = ["@allow *.h", "@allow *.hpp", "@allow *.cpp", "@allow *.c"]
+```
+# .evfsignore
+@passthrough *.png
+@passthrough *.jpg
+@passthrough *.exe
 ```
 
-**Skip binary assets, convert sources:**
+Or in TOML:
 
 ```toml
 [encoding.filter]
-mode = "blacklist"
-rules = [
-    "@passthrough *.png",
-    "@passthrough *.jpg",
-    "@passthrough *.exe",
-    "build/",
-    "target/",
-]
+rules = ["@passthrough *.png", "@passthrough *.jpg", "@passthrough *.exe"]
 ```
 
 ---

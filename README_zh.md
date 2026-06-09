@@ -201,8 +201,7 @@ level = "info"
 | `encoding` | `detect_sample_bytes` | 编码检测读取的字节数 | `8192` |
 | `encoding` | `cache_max_entries` | 编码缓存最大条目数（LRU） | `10000` |
 | `encoding` | `cache_ttl_seconds` | 缓存过期时间（秒） | `3600` |
-| `encoding.filter` | `mode` | 过滤模式：`"blacklist"`（全可见）或 `"whitelist"`（全隐藏） | `blacklist` |
-| `encoding.filter` | `rules` | 内联 glob 规则 | `[]` |
+| `encoding.filter` | `rules` | `@passthrough` 规则 | `[]` |
 | `log` | `level` | 日志级别 | `info` |
 
 ### 编码配置示例
@@ -246,7 +245,7 @@ encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
 
 ## 过滤器
 
-控制挂载时哪些文件可见、哪些隐藏、哪些跳过编码转换。
+控制哪些文件跳过编码转换，挂载后所有文件都可见。
 
 ### 规则来源（两处合并）
 
@@ -255,73 +254,30 @@ encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
 
 文件规则先加载，配置规则后追加。
 
-### 两种模式
-
-**黑名单（默认）** — 默认全部可见，规则标记隐藏或跳过编码：
-
-```
-# .encodingvfs-filter
-# 隐藏
-*.dll
-build/
-.git/
-
-# 跳过编码，直接返回原始字节
-@passthrough *.png
-@passthrough *.jpg
-```
-
-**白名单** — 默认全部隐藏，`@allow` 标记才可见：
-
-```
-# .encodingvfs-filter
-# 只显示 C/C++ 源码
-@allow *.h
-@allow *.cpp
-
-# 但隐藏测试文件
-src/test/
-```
-
 ### 规则语法
 
 | 规则 | 效果 | 示例 |
 |------|------|------|
-| `*.ext` | 隐藏匹配的后缀 | `*.dll`、`*.bin` |
-| `dir/` | 隐藏目录树 | `build/`、`.git/` |
-| `**/*.tmp` | 递归 glob | 隐藏所有 `.tmp` |
 | `@passthrough pattern` | 跳过编码转换，返回原始字节 | `@passthrough *.png` |
-| `@allow pattern` | 白名单模式下可见 | `@allow *.cpp` |
 
-### 优先级
-
-1. `@passthrough` — 最高优先级
-2. 忽略规则（普通 glob）
-3. `@allow` — 白名单模式才有效
-4. 默认行为 — 黑名单可见 / 白名单隐藏
+未匹配 `@passthrough` 的文件都会正常进行编码转换。
 
 ### 配置示例
 
-**只转换 `.h`/`.cpp`，隐藏其他：**
+**跳过二进制资源，转换其他：**
 
-```toml
-[encoding.filter]
-mode = "whitelist"
-rules = ["@allow *.h", "@allow *.hpp", "@allow *.cpp", "@allow *.c"]
+```
+# .encodingvfs-filter
+@passthrough *.png
+@passthrough *.jpg
+@passthrough *.exe
 ```
 
-**跳过二进制资源，转换源码：**
+或者在 TOML 中：
 
 ```toml
 [encoding.filter]
-mode = "blacklist"
-rules = [
-    "@passthrough *.png",
-    "@passthrough *.jpg",
-    "@passthrough *.exe",
-    "build/",
-    "target/",
-]
+rules = ["@passthrough *.png", "@passthrough *.jpg", "@passthrough *.exe"]
 ```
 
 ---
