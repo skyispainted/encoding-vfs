@@ -234,8 +234,44 @@ impl EncodingVfs {
             );
         }
 
-        // Write to backend
-        self.write_backend_bytes(&full_path, offset, &decoded)?;
+        // For offset > 0, we can't write encoded bytes at the same offset because
+        // byte positions differ between encodings. Read entire file as UTF-8,
+        // splice in the new data at the UTF-8 offset, then re-encode everything.
+        if offset > 0 {
+            let file_info = self.get_file_info(rel_path)?;
+            let file_size = file_info.size as usize;
+
+            // Read existing content as target encoding (UTF-8)
+            let existing = self.read_file(rel_path, 0, file_size)?;
+
+            // Splice: replace at target-encoding offset
+            let utf8_offset = offset as usize;
+            let utf8_len = data.len();
+            let mut combined = Vec::with_capacity(utf8_offset + utf8_len);
+            if utf8_offset < existing.len() {
+                combined.extend_from_slice(&existing[..utf8_offset]);
+            } else {
+                combined.extend_from_slice(&existing);
+                // Pad with spaces if offset is past end
+                while combined.len() < utf8_offset {
+                    combined.push(b' ');
+                }
+            }
+            combined.extend_from_slice(data);
+            // Truncate after the inserted data
+            let new_end = utf8_offset + utf8_len;
+            if new_end < existing.len() {
+                combined.extend_from_slice(&existing[new_end..]);
+            }
+
+            // Re-encode entire result to source encoding
+            let (full_encoded, _) = from_encoding(&combined, self.target_encoding, src_enc);
+            self.write_backend_bytes(&full_path, 0, &full_encoded)?;
+            return Ok(full_encoded.len() as u64);
+        }
+
+        // Write to backend (offset 0: truncate and write)
+        self.write_backend_bytes(&full_path, 0, &decoded)?;
 
         Ok(decoded.len() as u64)
     }
@@ -371,6 +407,7 @@ mod tests {
             detect_sample_bytes: 8192,
             cache_max_entries: 100,
             cache_ttl_seconds: 60,
+            filter: None,
         };
 
         let vfs = EncodingVfs::new(&temp_dir, config).unwrap();
@@ -404,6 +441,7 @@ mod tests {
             detect_sample_bytes: 8192,
             cache_max_entries: 100,
             cache_ttl_seconds: 60,
+            filter: None,
         };
 
         let vfs = EncodingVfs::new(&temp_dir, config).unwrap();

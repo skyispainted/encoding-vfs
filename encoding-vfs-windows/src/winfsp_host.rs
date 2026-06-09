@@ -135,8 +135,18 @@ impl FileSystemContext for WinFspVfsHost {
 
         let metadata = std::fs::metadata(&full_path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
-        let size = metadata.len();
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+
+        // Report size in target encoding (UTF-8), not backend size
+        let size = if is_dir {
+            0
+        } else {
+            let rel = self.rel_path(&full_path);
+            match self.vfs.get_file_info(rel) {
+                Ok(info) => info.size,
+                Err(_) => metadata.len(),
+            }
+        };
 
         Self::fill_file_info(file_info.as_mut(), is_dir, size, modified);
 
@@ -231,27 +241,20 @@ impl FileSystemContext for WinFspVfsHost {
     fn set_file_size(
         &self,
         context: &Self::FileContext,
-        new_size: u64,
-        set_allocation_size: bool,
+        _new_size: u64,
+        _set_allocation_size: bool,
         file_info: &mut FileInfo,
     ) -> Result<()> {
         if context.is_dir {
             return Err(windows::Win32::Foundation::STATUS_FILE_IS_A_DIRECTORY.into());
         }
-        // Directly truncate the backend file without encoding conversion
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(&context.path)
-            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?
-            .set_len(new_size)
+        // Don't truncate here - the actual size change happens in write().
+        // The requested size is in target encoding (UTF-8), which doesn't match
+        // the backend file's encoded size. Truncating here causes stale data at tail.
+        let metadata = std::fs::metadata(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
-        if set_allocation_size {
-            let metadata = std::fs::metadata(&context.path)
-                .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
-            let modified = metadata.modified().unwrap_or(SystemTime::now());
-            Self::fill_file_info(file_info, false, metadata.len(), modified);
-        }
+        let modified = metadata.modified().unwrap_or(SystemTime::now());
+        Self::fill_file_info(file_info, false, metadata.len(), modified);
         Ok(())
     }
 
@@ -288,14 +291,19 @@ impl FileSystemContext for WinFspVfsHost {
         if context.path.to_string_lossy().contains("KItem.cpp") {
             debug!("get_file_info: path={} is_dir={}", context.path.display(), context.is_dir);
         }
-        let metadata = std::fs::metadata(&context.path)
-            .map_err(|_| windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND)?;
-        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        let created = metadata.created().unwrap_or(SystemTime::UNIX_EPOCH);
-        let accessed = metadata.accessed().unwrap_or(SystemTime::UNIX_EPOCH);
-        Self::fill_file_info(file_info, context.is_dir, metadata.len(), modified);
-        file_info.creation_time = Self::file_time(created);
-        file_info.last_access_time = Self::file_time(accessed);
+        if context.is_dir {
+            let metadata = std::fs::metadata(&context.path)
+                .map_err(|_| windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND)?;
+            let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            Self::fill_file_info(file_info, true, 0, modified);
+        } else {
+            let rel = self.rel_path(&context.path);
+            let vfs_info = self.vfs.get_file_info(rel)
+                .map_err(|_| windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND)?;
+            Self::fill_file_info(file_info, false, vfs_info.size, vfs_info.modified);
+            file_info.creation_time = Self::file_time(vfs_info.created);
+            file_info.last_access_time = Self::file_time(vfs_info.accessed);
+        }
         Ok(())
     }
 
@@ -342,12 +350,16 @@ impl FileSystemContext for WinFspVfsHost {
 
         let rel = self.rel_path(&context.path);
         match self.vfs.write_file(rel, offset, buffer) {
-            Ok(written) => {
+            Ok(_) => {
+                // Return buffer.len() to WinFsp: this is the number of bytes it asked
+                // us to write. The actual encoded byte count may differ (UTF-8 vs GBK),
+                // but WinFsp expects this value to equal buffer.len() or it will retry
+                // writes at wrong offsets, causing duplicate/trailing content.
                 let metadata = std::fs::metadata(&context.path)
                     .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
                 let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 Self::fill_file_info(file_info, false, metadata.len(), modified);
-                Ok(written as u32)
+                Ok(buffer.len() as u32)
             }
             Err(e) => {
                 warn!(error = %e, path = ?rel, "write failed");

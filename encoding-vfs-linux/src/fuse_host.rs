@@ -257,7 +257,7 @@ impl Filesystem for FuseVfsHost {
             .unwrap_or(&path);
 
         match self.vfs.write_file(rel, offset as u64, data) {
-            Ok(n) => reply.written(n as u32),
+            Ok(_) => reply.written(data.len() as u32),
             Err(e) => {
                 warn!(error = %e, path = ?rel, "write failed");
                 reply.error(libc::EIO);
