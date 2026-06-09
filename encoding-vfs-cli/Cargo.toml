@@ -10,14 +10,17 @@ path = "src/main.rs"
 
 [features]
 # Enable WinFsp virtual drive mount support (requires WinFsp runtime installed)
-mount = ["dep:encoding-vfs-windows", "encoding-vfs-windows/mount"]
+# Only meaningful on Windows; on Linux this feature is a no-op (FUSE is always available).
+mount = []
 
 [dependencies]
 encoding-vfs-core = { path = "../encoding-vfs-core" }
-encoding-vfs-windows = { path = "../encoding-vfs-windows", optional = true }
 clap = { version = "=4.4.11", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+encoding-vfs-windows = { path = "../encoding-vfs-windows", features = ["mount"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 encoding-vfs-linux = { path = "../encoding-vfs-linux" }

@@ -54,15 +54,24 @@ Get-Service WinFsp.Launcher
 从 [Releases](https://github.com/skyispainted/encoding-vfs/releases) 下载最新版本：
 
 ```powershell
-# 下载 encoding-vfs-Windows-x64-vX.Y.Z，解压到任意目录
-# 直接运行：
+# 1. 下载 encoding-vfs-Windows-x64，解压到任意目录
+# 2. 拷贝 WinFsp DLL（挂载必需）：
+#    - 默认: C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll
+#    - 或:   C:\Program Files\WinFsp\bin\winfsp-x64.dll
+Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" .\
+# 3. 运行：
 .\encoding-vfs.exe -b C:\projects\original -d X
 ```
 
 ### 从源码编译
 
 ```powershell
-cargo build --release --features mount
+cargo build --release
+```
+
+编译后需拷贝 `winfsp-x64.dll` 到二进制同目录：
+```powershell
+Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" target\release\
 ```
 
 ### 运行

@@ -54,15 +54,24 @@ Get-Service WinFsp.Launcher
 Download the latest release from [Releases](https://github.com/skyispainted/encoding-vfs/releases):
 
 ```powershell
-# Download encoding-vfs-Windows-x64-vX.Y.Z.zip, extract to a directory
-# Run directly:
+# 1. Download encoding-vfs-Windows-x64, extract to a directory
+# 2. Copy the WinFsp DLL (required for mount):
+#    - Default: C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll
+#    - Or:      C:\Program Files\WinFsp\bin\winfsp-x64.dll
+Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" .\
+# 3. Run:
 .\encoding-vfs.exe -b C:\projects\original -d X
 ```
 
 ### Build from Source
 
 ```powershell
-cargo build --release --features mount
+cargo build --release
+```
+
+After building, copy `winfsp-x64.dll` next to `encoding-vfs.exe`:
+```powershell
+Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" target\release\
 ```
 
 ### Run

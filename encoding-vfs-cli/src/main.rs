@@ -66,20 +66,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     {
         info!("Platform: Windows");
-        info!("Drive letter: {} (WinFsp mount requires 'mount' feature)", args.drive);
+        info!("Drive letter: {}", args.drive);
 
-        #[cfg(feature = "mount")]
-        {
-            let host = encoding_vfs_windows::WinFspVfsHost::new(vfs);
-            encoding_vfs_windows::run(host, args.drive)?;
-        }
-
-        #[cfg(not(feature = "mount"))]
-        {
-            let _ = vfs;
-            warn!("WinFsp mount is not available. Build with --features mount and install WinFsp to enable virtual drive.");
-            info!("Core VFS is functional for encoding detection/conversion testing.");
-        }
+        let host = encoding_vfs_windows::WinFspVfsHost::new(vfs);
+        encoding_vfs_windows::run(host, args.drive)?;
     }
 
     #[cfg(target_os = "linux")]

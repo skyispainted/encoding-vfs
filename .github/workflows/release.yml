@@ -32,7 +32,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build release
-        run: cargo build --release --features mount
+        run: cargo build --release
         working-directory: ${{ github.workspace }}
 
       - name: Upload binary
