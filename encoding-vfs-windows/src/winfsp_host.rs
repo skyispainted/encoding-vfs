@@ -238,21 +238,14 @@ impl FileSystemContext for WinFspVfsHost {
         if context.is_dir {
             return Err(windows::Win32::Foundation::STATUS_FILE_IS_A_DIRECTORY.into());
         }
-        // Write zeros to extend/truncate the file to new_size
-        let rel = self.rel_path(&context.path);
-        match self.vfs.write_file(rel, 0, &vec![0u8; new_size as usize]) {
-            Ok(_) => {}
-            Err(_) => {
-                // Fallback
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(&context.path)
-                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?
-                    .set_len(new_size)
-                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
-            }
-        }
+        // Directly truncate the backend file without encoding conversion
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&context.path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?
+            .set_len(new_size)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         if set_allocation_size {
             let metadata = std::fs::metadata(&context.path)
                 .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
