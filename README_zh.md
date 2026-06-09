@@ -247,9 +247,11 @@ encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
 
 控制哪些文件跳过编码转换，挂载后所有文件都可见。
 
+规则遵循 `.gitignore` 格式和语义。
+
 ### 规则来源（两处合并）
 
-1. **`.encodingvfs-filter`** — 放在 backend 目录根下
+1. **`.evfsignore`** — 放在 backend 目录根下
 2. **`[encoding.filter] rules`** — TOML 配置中的内联规则
 
 文件规则先加载，配置规则后追加。
@@ -258,26 +260,42 @@ encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
 
 | 规则 | 效果 | 示例 |
 |------|------|------|
-| `@passthrough pattern` | 跳过编码转换，返回原始字节 | `@passthrough *.png` |
+| `*.ext` | 跳过编码，返回原始字节 | `*.png`, `*.exe` |
+| `dir/` | 跳过整个目录树 | `assets/`, `lib/` |
+| `**/*.tmp` | 递归匹配 | 所有 `.tmp` 文件 |
+| `!pattern` | 取反：恢复编码转换 | `!logo.png` |
 
-未匹配 `@passthrough` 的文件都会正常进行编码转换。
+### 匹配规则
+
+- 规则**按顺序**匹配，**最后一条匹配的规则决定结果**。
+- 默认（不匹配任何规则）：正常编码转换。
+- `!pattern` 取消之前的匹配 — 为该文件恢复编码转换。
 
 ### 配置示例
 
 **跳过二进制资源，转换其他：**
 
 ```
-# .encodingvfs-filter
-@passthrough *.png
-@passthrough *.jpg
-@passthrough *.exe
+# .evfsignore
+*.png
+*.jpg
+*.exe
+```
+
+**只转换 `.h`/`.cpp`，其他全部返回原始字节：**
+
+```
+# .evfsignore
+**/*
+!*.h
+!*.cpp
 ```
 
 或者在 TOML 中：
 
 ```toml
 [encoding.filter]
-rules = ["@passthrough *.png", "@passthrough *.jpg", "@passthrough *.exe"]
+rules = ["**/*", "!*.h", "!*.cpp"]
 ```
 
 ---

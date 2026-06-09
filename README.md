@@ -245,6 +245,8 @@ encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
 Control which files bypass encoding conversion in the mounted drive.
 All files are always visible — the only distinction is whether encoding conversion applies.
 
+Rules follow `.gitignore` format and semantics.
+
 ### Sources (merged)
 
 1. **`.evfsignore`** — place in backend directory root
@@ -256,9 +258,16 @@ File rules load first, config rules append.
 
 | Rule | Effect | Example |
 |------|--------|---------|
-| `@passthrough pattern` | Skip encoding, return raw bytes | `@passthrough *.png` |
+| `*.ext` | Skip encoding, return raw bytes | `*.png`, `*.exe` |
+| `dir/` | Skip encoding for directory tree | `assets/`, `lib/` |
+| `**/*.tmp` | Recursive glob | all `.tmp` files recursively |
+| `!pattern` | Negation: restore encoding for matching files | `!logo.png` |
 
-All files not matching `@passthrough` will be encoded normally.
+### Evaluation
+
+- Rules are evaluated **in order**; the **last matching pattern wins**.
+- Default (no match): normal encoding conversion.
+- `!pattern` negates a previous match — restores encoding for that file.
 
 ### Config Example
 
@@ -266,16 +275,24 @@ All files not matching `@passthrough` will be encoded normally.
 
 ```
 # .evfsignore
-@passthrough *.png
-@passthrough *.jpg
-@passthrough *.exe
+*.png
+*.jpg
+*.exe
+```
+
+**Skip all images except logo.png:**
+
+```
+# .evfsignore
+*.png
+!logo.png
 ```
 
 Or in TOML:
 
 ```toml
 [encoding.filter]
-rules = ["@passthrough *.png", "@passthrough *.jpg", "@passthrough *.exe"]
+rules = ["*.png", "!logo.png"]
 ```
 
 ---

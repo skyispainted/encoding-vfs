@@ -13,13 +13,24 @@ pub struct FilterConfig {
     pub rules: Vec<String>,
 }
 
+/// A single filter pattern, matching .gitignore-style semantics.
+#[derive(Debug, Clone)]
+struct Pattern {
+    matcher: GlobMatcher,
+    /// `true` means "do NOT passthrough" (negation, like `!` in .gitignore).
+    negated: bool,
+}
+
 /// Filter rules: control which files bypass encoding conversion.
-/// All files are always visible in the mount. The only distinction is:
-/// - Passthrough: return raw bytes, skip encoding
-/// - Visible: normal encoding conversion applies
+/// All files are always visible. Patterns matching a file cause it to
+/// skip encoding conversion (return raw bytes). Format follows .gitignore style.
+///
+/// Rules are evaluated in order; the last matching pattern wins.
+/// Default (no match) = normal encoding conversion.
+/// `!pattern` negates a previous match (restore encoding).
 #[derive(Debug, Clone)]
 pub struct VfsFilter {
-    passthrough_matchers: Vec<GlobMatcher>,
+    patterns: Vec<Pattern>,
 }
 
 impl VfsFilter {
@@ -42,29 +53,43 @@ impl VfsFilter {
         // Append inline rules
         all_lines.extend(inline_rules.iter().cloned());
 
-        let mut passthrough_matchers = Vec::new();
+        let mut patterns = Vec::new();
 
         for line in &all_lines {
-            if line.starts_with("@passthrough ") {
-                let pattern = line.strip_prefix("@passthrough ").unwrap().trim();
-                if let Ok(glob) = Glob::new(pattern) {
-                    passthrough_matchers.push(glob.compile_matcher());
+            let (negated, pattern) = if let Some(rest) = line.strip_prefix('!') {
+                (true, rest.trim())
+            } else {
+                (false, line.as_str())
+            };
+
+            if let Ok(glob) = Glob::new(pattern) {
+                patterns.push(Pattern {
+                    matcher: glob.compile_matcher(),
+                    negated,
+                });
+            }
+        }
+
+        Self { patterns }
+    }
+
+    /// Whether a path should bypass encoding conversion.
+    /// Rules are evaluated in order; last matching pattern wins.
+    pub fn is_passthrough(&self, rel_path: &Path) -> bool {
+        let path_str = rel_path.to_string_lossy().replace('\\', "/");
+        let mut result = false; // default: normal encoding
+
+        for p in &self.patterns {
+            if p.matcher.is_match(&path_str) {
+                if p.negated {
+                    result = false; // negation: restore encoding
+                } else {
+                    result = true; // skip encoding
                 }
             }
         }
 
-        Self { passthrough_matchers }
-    }
-
-    /// Whether a path should bypass encoding conversion.
-    pub fn is_passthrough(&self, rel_path: &Path) -> bool {
-        let path_str = rel_path.to_string_lossy().replace('\\', "/");
-        for m in &self.passthrough_matchers {
-            if m.is_match(&path_str) {
-                return true;
-            }
-        }
-        false
+        result
     }
 }
 
@@ -78,19 +103,43 @@ mod tests {
     }
 
     #[test]
-    fn test_passthrough() {
-        let f = make_filter(&["@passthrough *.png"]);
+    fn test_basic_passthrough() {
+        let f = make_filter(&["*.png"]);
         assert!(f.is_passthrough(Path::new("photo.png")));
         assert!(f.is_passthrough(Path::new("icons/icon.png")));
         assert!(!f.is_passthrough(Path::new("readme.md")));
     }
 
     #[test]
-    fn test_multiple_passthrough() {
-        let f = make_filter(&["@passthrough *.png", "@passthrough *.exe"]);
+    fn test_negation() {
+        let f = make_filter(&["*.png", "!logo.png"]);
+        assert!(f.is_passthrough(Path::new("photo.png")));
+        assert!(f.is_passthrough(Path::new("icons/icon.png")));
+        // Negated: logo.png uses encoding even though *.png matches
+        assert!(!f.is_passthrough(Path::new("logo.png")));
+    }
+
+    #[test]
+    fn test_negation_before_positive() {
+        let f = make_filter(&["*.png", "!logo.png", "logo.png"]);
+        // logo.png matches three times, last one is positive → passthrough
+        assert!(f.is_passthrough(Path::new("logo.png")));
+    }
+
+    #[test]
+    fn test_multiple() {
+        let f = make_filter(&["*.png", "*.exe"]);
         assert!(f.is_passthrough(Path::new("image.png")));
         assert!(f.is_passthrough(Path::new("setup.exe")));
         assert!(!f.is_passthrough(Path::new("data.txt")));
+    }
+
+    #[test]
+    fn test_directory() {
+        let f = make_filter(&["assets/"]);
+        assert!(f.is_passthrough(Path::new("assets/logo.png")));
+        assert!(f.is_passthrough(Path::new("assets/sub/photo.jpg")));
+        assert!(!f.is_passthrough(Path::new("myassets/file.txt")));
     }
 
     #[test]
