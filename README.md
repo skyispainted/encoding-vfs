@@ -1,5 +1,7 @@
 # encoding-vfs
 
+[English](README.md) | [中文](README_zh.md)
+
 Transparent virtual filesystem that automatically converts legacy-encoded files to UTF-8 on read, and converts UTF-8 back to the original encoding on write. Mounts as a virtual drive so that any application — including Claude Code, VS Code, or `cat` — sees clean UTF-8 content without needing any special configuration.
 
 ## Problem
@@ -362,16 +364,3 @@ On Linux, the FUSE adapter is always included (no feature flag needed).
 - Requires `libfuse3-dev` and `pkg-config` at build time
 - Runtime requires `/dev/fuse` device and `fusermount`/`fusermount3`
 - If other users need access, uncomment `user_allow_other` in `/etc/fuse.conf`
-
-## CI / Release
-
-Push a tag to trigger automated builds:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-This creates draft releases on GitHub:
-- `encoding-vfs-Windows-x64-v0.1.0.zip` — binary + WinFsp DLL + README
-- `encoding-vfs-Linux-x64-v0.1.0.tar.gz` — binary + README
