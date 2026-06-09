@@ -35,21 +35,15 @@ jobs:
         run: cargo build --release --features mount
         working-directory: ${{ github.workspace }}
 
-      - name: Package binary
+      - name: Upload binary
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF -replace 'refs/tags/v', ''
-          $dir = "encoding-vfs-Windows-x64-v${version}"
-          New-Item -Path $dir -ItemType Directory -Force
-          Copy-Item target\release\encoding-vfs.exe $dir\
-          Copy-Item README.md $dir\
-          Copy-Item encoding-vfs.toml.example $dir\ -ErrorAction SilentlyContinue
-          Compress-Archive -Path "$dir\*" -DestinationPath "${dir}.zip"
+          Copy-Item target\release\encoding-vfs.exe encoding-vfs-Windows-x64.exe
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: encoding-vfs-*.zip
+          files: encoding-vfs-Windows-x64.exe
           generate_release_notes: true
           draft: true
 
@@ -85,19 +79,13 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Package binary
+      - name: Upload binary
         run: |
-          version="${GITHUB_REF#refs/tags/v}"
-          dir="encoding-vfs-Linux-x64-v${version}"
-          mkdir -p "$dir"
-          cp target/release/encoding-vfs "$dir/"
-          cp README.md "$dir/"
-          [ -f encoding-vfs.toml.example ] && cp encoding-vfs.toml.example "$dir/" || true
-          tar czf "${dir}.tar.gz" "$dir"/*
+          cp target/release/encoding-vfs encoding-vfs-Linux-x64
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: encoding-vfs-*.tar.gz
+          files: encoding-vfs-Linux-x64
           generate_release_notes: true
           draft: true
