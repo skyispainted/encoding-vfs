@@ -145,7 +145,7 @@ impl EncodingVfs {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create(true)
-            .truncate(true)
+            .truncate(offset == 0)
             .open(full_path)?;
 
         if offset > 0 {
