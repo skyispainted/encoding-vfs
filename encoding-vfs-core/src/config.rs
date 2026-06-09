@@ -8,7 +8,6 @@ pub struct Config {
     pub mount: MountConfig,
     pub encoding: EncodingConfig,
     pub log: Option<LogConfig>,
-    pub filter: Option<FilterConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -44,6 +43,9 @@ pub struct EncodingConfig {
     pub cache_max_entries: u64,
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_seconds: u64,
+    /// Filter rules for encoding conversion
+    #[serde(default)]
+    pub filter: Option<FilterConfig>,
 }
 
 fn default_source_encoding() -> String {
@@ -122,12 +124,12 @@ impl Config {
                         detect_sample_bytes: 8192,
                         cache_max_entries: 10000,
                         cache_ttl_seconds: 3600,
+                        filter: None,
                     },
                     log: Some(LogConfig {
                         level: "info".to_string(),
                         file: None,
                     }),
-                    filter: None,
                 })
             }
         }

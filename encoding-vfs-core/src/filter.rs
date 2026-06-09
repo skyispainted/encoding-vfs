@@ -75,22 +75,16 @@ impl VfsFilter {
             if line.starts_with("@passthrough ") {
                 let pattern = line.strip_prefix("@passthrough ").unwrap().trim();
                 if let Ok(glob) = Glob::new(pattern) {
-                    if let Ok(matcher) = glob.compile_matcher() {
-                        passthrough_matchers.push(matcher);
-                    }
+                    passthrough_matchers.push(glob.compile_matcher());
                 }
             } else if line.starts_with("@allow ") {
                 let pattern = line.strip_prefix("@allow ").unwrap().trim();
                 if let Ok(glob) = Glob::new(pattern) {
-                    if let Ok(matcher) = glob.compile_matcher() {
-                        allow_matchers.push(matcher);
-                    }
+                    allow_matchers.push(glob.compile_matcher());
                 }
             } else {
                 if let Ok(glob) = Glob::new(line) {
-                    if let Ok(matcher) = glob.compile_matcher() {
-                        ignore_matchers.push(matcher);
-                    }
+                    ignore_matchers.push(glob.compile_matcher());
                 }
             }
         }
