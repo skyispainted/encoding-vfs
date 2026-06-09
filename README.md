@@ -221,9 +221,9 @@ encoding-vfs.exe -b C:\legacy-project -d X -c config.toml -s Big5
 ./encoding-vfs -b /home/user/legacy-project -m /mnt/gbk-vfs -c encoding-vfs.toml
 ```
 
-## Configuration
+## Configuration File
 
-Create `encoding-vfs.toml`:
+Create `encoding-vfs.toml` (or any name and pass via `-c`):
 
 ```toml
 [backend]
@@ -250,20 +250,178 @@ rules = ["*.dll", "logs/"]      # inline rules, same format as filter file
 level = "info"
 ```
 
-### Config Options
+### All Config Options
 
 | Section | Key | Description | Default |
 |---------|-----|-------------|---------|
-| `backend` | `backend_dir` | Directory containing original files | `.` |
-| `mount` | `drive_letter` | Windows drive letter | `X` |
-| `mount` | `mount_point` | Linux FUSE mount point | `/mnt/gbk-vfs` |
-| `encoding` | `source_encoding` | Source encoding (`auto` for detection) | `auto` |
-| `encoding` | `target_encoding` | Target encoding presented to apps | `UTF-8` |
-| `encoding` | `default_encoding` | Fallback when auto-detect fails | `GBK` |
-| `encoding` | `detect_sample_bytes` | Bytes to read for encoding detection | `8192` |
-| `encoding` | `cache_max_entries` | Max entries in encoding cache | `10000` |
-| `encoding` | `cache_ttl_seconds` | Cache entry time-to-live | `3600` |
-| `log` | `level` | Log verbosity | `info` |
+| `backend` | `backend_dir` | Directory containing original (source-encoded) files | `.` |
+| `mount` | `drive_letter` | Windows drive letter to mount the VFS on | `X` |
+| `mount` | `mount_point` | Linux FUSE mount point path | `/mnt/gbk-vfs` |
+| `encoding` | `source_encoding` | Encoding of backend files. `"auto"` to detect per-file, or a fixed encoding name like `"GBK"`, `"Shift_JIS"`, `"Big5"` | `auto` |
+| `encoding` | `target_encoding` | Encoding presented to applications reading the mounted drive | `UTF-8` |
+| `encoding` | `default_encoding` | Fallback encoding when auto-detection fails | `GBK` |
+| `encoding` | `detect_sample_bytes` | Number of bytes read from each file for encoding detection | `8192` |
+| `encoding` | `cache_max_entries` | Max entries in the per-file encoding cache (LRU) | `10000` |
+| `encoding` | `cache_ttl_seconds` | Seconds before a cached encoding entry expires | `3600` |
+| `encoding.filter` | `mode` | Filter mode: `"blacklist"` (all visible unless hidden) or `"whitelist"` (all hidden unless allowed) | `blacklist` |
+| `encoding.filter` | `rules` | Inline glob rules — same format as `.encodingvfs-filter` file | `[]` |
+| `log` | `level` | Log level: `trace`, `debug`, `info`, `warn`, `error` | `info` |
+
+### Encoding Config Examples
+
+**Auto-detect all files, present as UTF-8 (most common):**
+
+```toml
+[encoding]
+source_encoding = "auto"
+target_encoding = "UTF-8"
+default_encoding = "GBK"
+```
+
+**Fixed source encoding (faster, skips per-file detection):**
+
+```toml
+[encoding]
+source_encoding = "Shift_JIS"
+target_encoding = "UTF-8"
+default_encoding = "Shift_JIS"
+```
+
+**Mount as GBK instead of UTF-8 (e.g., for apps that expect GBK):**
+
+```toml
+[encoding]
+source_encoding = "auto"
+target_encoding = "GBK"
+default_encoding = "GBK"
+```
+
+### Priority: CLI > Config File > Defaults
+
+CLI flags override the config file, which overrides defaults:
+
+```
+# encoding-vfs.toml says Big5, but CLI overrides to GBK
+encoding-vfs.exe -b C:\legacy -d X -c encoding-vfs.toml -s GBK
+```
+
+## Filter
+
+Control which files are visible in the mounted drive, which are hidden, and which bypass encoding conversion.
+
+### Two Sources
+
+Filters can be defined in two places — they are merged:
+
+1. **`.encodingvfs-filter` file** — place in the backend directory root
+2. **TOML config `rules`** — inline rules in `encoding-vfs.toml`
+
+Both use the same rule format. File rules are loaded first, then config rules are appended.
+
+### Two Modes
+
+#### Blacklist Mode (default)
+
+All files are **visible** by default. Rules mark files as hidden or bypass encoding.
+
+```
+# .encodingvfs-filter
+
+# Comments start with #
+# Hide specific extensions
+*.dll
+*.exe
+*.bin
+
+# Hide entire directories
+build/
+target/
+.git/
+
+# Bypass encoding conversion for binary files (return raw bytes)
+@passthrough *.png
+@passthrough *.jpg
+@passthrough *.zip
+```
+
+#### Whitelist Mode
+
+All files are **hidden** by default. Only `@allow` patterns make files visible.
+
+```
+# .encodingvfs-filter
+
+# Only show C/C++ sources and headers
+@allow *.h
+@allow *.hpp
+@allow *.cpp
+@allow *.c
+
+# But hide test files even under src/
+src/test/
+
+# Also show README files
+@allow *.md
+```
+
+### Rule Syntax
+
+| Rule | Description | Example |
+|------|-------------|---------|
+| `*.ext` | Hide files matching the glob (blacklist mode) | `*.dll`, `*.exe` |
+| `dir/` | Hide all files under a directory | `build/`, `logs/` |
+| `src/**/*.tmp` | Glob with recursive matching | hides all `.tmp` under `src/` |
+| `@passthrough pattern` | Files match this pattern skip encoding conversion and return raw bytes as-is | `@passthrough *.png` |
+| `@allow pattern` | In whitelist mode, files matching this pattern become visible | `@allow *.cpp` |
+
+### Priority
+
+Rules are evaluated in this order:
+
+1. `@passthrough` — always checked first, highest priority in both modes
+2. Explicit ignore rules (plain globs) — hide matching files in both modes
+3. `@allow` — make files visible (only matters in whitelist mode)
+4. Default behavior — visible in blacklist, hidden in whitelist
+
+### TOML Config Filter Examples
+
+**Only convert `.h` and `.cpp` files, hide everything else:**
+
+```toml
+[encoding.filter]
+mode = "whitelist"
+rules = ["@allow *.h", "@allow *.hpp", "@allow *.cpp", "@allow *.c"]
+```
+
+**Convert source files but skip binary assets:**
+
+```toml
+[encoding.filter]
+mode = "blacklist"
+rules = [
+    "@passthrough *.png",
+    "@passthrough *.jpg",
+    "@passthrough *.gif",
+    "@passthrough *.exe",
+    "@passthrough *.dll",
+    "build/",
+    "target/",
+]
+```
+
+**Mixed: hide binaries, allow only sources, passthrough images:**
+
+```toml
+[encoding.filter]
+mode = "whitelist"
+rules = [
+    "@allow *.h",
+    "@allow *.cpp",
+    "@allow *.md",
+    "@passthrough *.png",
+    "src/test/",
+]
+```
 
 ## How It Works
 

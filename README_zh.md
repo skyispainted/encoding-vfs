@@ -223,7 +223,7 @@ encoding-vfs.exe -b C:\legacy-project -d X -c config.toml -s Big5
 
 ## 配置文件
 
-创建 `encoding-vfs.toml`：
+创建 `encoding-vfs.toml`（可自定义文件名，通过 `-c` 传入）：
 
 ```toml
 [backend]
@@ -250,64 +250,178 @@ rules = ["*.dll", "logs/"]      # 内联规则，格式同过滤器文件
 level = "info"
 ```
 
-### 配置项
+### 配置项详解
 
 | 节 | 键 | 说明 | 默认值 |
 |---------|-----|-------------|---------|
-| `backend` | `backend_dir` | 包含原始文件的目录 | `.` |
-| `mount` | `drive_letter` | Windows 驱动器盘符 | `X` |
-| `mount` | `mount_point` | Linux FUSE 挂载点 | `/mnt/gbk-vfs` |
-| `encoding` | `source_encoding` | 源编码（`auto` 为自动检测） | `auto` |
-| `encoding` | `target_encoding` | 呈现给应用的编码 | `UTF-8` |
-| `encoding` | `default_encoding` | 自动检测失败时的回退 | `GBK` |
-| `encoding` | `detect_sample_bytes` | 编码检测读取的字节数 | `8192` |
-| `encoding` | `cache_max_entries` | 编码缓存最大条目数 | `10000` |
-| `encoding` | `cache_ttl_seconds` | 缓存条目过期时间 | `3600` |
-| `log` | `level` | 日志级别 | `info` |
+| `backend` | `backend_dir` | 包含原始（源编码）文件的目录 | `.` |
+| `mount` | `drive_letter` | Windows 挂载的驱动器盘符 | `X` |
+| `mount` | `mount_point` | Linux FUSE 挂载点路径 | `/mnt/gbk-vfs` |
+| `encoding` | `source_encoding` | 后端文件编码。`"auto"` 逐文件检测，或指定固定编码如 `"GBK"`、`"Shift_JIS"` | `auto` |
+| `encoding` | `target_encoding` | 挂载后呈现给应用的编码 | `UTF-8` |
+| `encoding` | `default_encoding` | 自动检测失败时的回退编码 | `GBK` |
+| `encoding` | `detect_sample_bytes` | 编码检测时读取的字节数 | `8192` |
+| `encoding` | `cache_max_entries` | 编码缓存最大条目数（LRU 淘汰） | `10000` |
+| `encoding` | `cache_ttl_seconds` | 缓存条目过期时间（秒） | `3600` |
+| `encoding.filter` | `mode` | 过滤模式：`"blacklist"`（默认全部可见）或 `"whitelist"`（默认全部隐藏） | `blacklist` |
+| `encoding.filter` | `rules` | 内联 glob 规则，格式同 `.encodingvfs-filter` 文件 | `[]` |
+| `log` | `level` | 日志级别：`trace`、`debug`、`info`、`warn`、`error` | `info` |
+
+### 编码配置示例
+
+**自动检测所有文件，呈现为 UTF-8（最常用）：**
+
+```toml
+[encoding]
+source_encoding = "auto"
+target_encoding = "UTF-8"
+default_encoding = "GBK"
+```
+
+**固定源编码（更快，跳过逐文件检测）：**
+
+```toml
+[encoding]
+source_encoding = "Shift_JIS"
+target_encoding = "UTF-8"
+default_encoding = "Shift_JIS"
+```
+
+**挂载后呈现为 GBK（适配需要 GBK 的应用）：**
+
+```toml
+[encoding]
+source_encoding = "auto"
+target_encoding = "GBK"
+default_encoding = "GBK"
+```
+
+### 优先级：命令行 > 配置文件 > 默认值
+
+命令行参数覆盖配置文件，配置文件覆盖默认值：
+
+```powershell
+# 配置文件写的是 Big5，但命令行覆盖为 GBK
+encoding-vfs.exe -b C:\legacy -d X -c encoding-vfs.toml -s GBK
+```
 
 ## 过滤器
 
-在 backend 目录根下创建 `.encodingvfs-filter` 文件，控制哪些文件可见、编码转换或隐藏。
+控制挂载时哪些文件可见、哪些隐藏、哪些跳过编码转换。
+
+### 规则来源（两处合并）
+
+过滤器可以定义在两个位置，规则会合并：
+
+1. **`.encodingvfs-filter` 文件** — 放在 backend 目录根下
+2. **TOML 配置的 `rules`** — `encoding-vfs.toml` 中的内联规则
+
+两者使用相同的规则格式。先加载文件规则，再追加配置规则。
 
 ### 两种模式
 
-**黑名单（默认）**：默认所有文件可见，规则标记的文件被隐藏或不经编码转换。
+#### 黑名单模式（默认）
+
+默认所有文件**可见**。规则标记文件为隐藏或跳过编码。
 
 ```
-# 注释行
-*.dll                  # 所有 .dll 文件不可见
-logs/                  # logs/ 目录不可见
-src/test/              # 排除 src/test/ 下的文件
+# .encodingvfs-filter
 
-# 不经编码转换，原样返回
+# 注释以 # 开头
+# 隐藏特定后缀
+*.dll
+*.exe
+*.bin
+
+# 隐藏整个目录
+build/
+target/
+.git/
+
+# 跳过编码转换，直接返回原始字节（适用于二进制文件）
 @passthrough *.png
 @passthrough *.jpg
+@passthrough *.zip
 ```
 
-**白名单**：默认所有文件隐藏，`@allow` 规则标记的文件才可见。
+#### 白名单模式
+
+默认所有文件**隐藏**。只有 `@allow` 规则标记的文件才可见。
 
 ```
-# 只显示 C/C++ 源文件和头文件
+# .encodingvfs-filter
+
+# 只显示 C/C++ 源码和头文件
 @allow *.h
+@allow *.hpp
 @allow *.cpp
 @allow *.c
-@allow *.hpp
 
-# 排除子目录
+# 但隐藏 src/test/ 下的文件
 src/test/
+
+# 同时显示 README 文件
+@allow *.md
 ```
 
-### 配置文件中使用
+### 规则语法
+
+| 规则 | 说明 | 示例 |
+|------|------|------|
+| `*.ext` | 隐藏匹配的后缀文件（黑名单模式） | `*.dll`、`*.exe` |
+| `dir/` | 隐藏整个目录 | `build/`、`logs/` |
+| `src/**/*.tmp` | 递归 glob 匹配 | 隐藏 `src/` 下所有 `.tmp` |
+| `@passthrough pattern` | 匹配的文件跳过编码转换，直接返回原始字节 | `@passthrough *.png` |
+| `@allow pattern` | 白名单模式下，匹配的文件变为可见 | `@allow *.cpp` |
+
+### 优先级
+
+规则按以下顺序评估：
+
+1. `@passthrough` — 最高优先级，两种模式都优先
+2. 忽略规则（普通 glob）— 两种模式都隐藏匹配的文件
+3. `@allow` — 使文件可见（仅白名单模式有意义）
+4. 默认行为 — 黑名单可见，白名单隐藏
+
+### TOML 配置过滤器示例
+
+**只转换 `.h` 和 `.cpp`，隐藏其他文件：**
 
 ```toml
 [encoding.filter]
 mode = "whitelist"
-rules = ["@allow *.h", "@allow *.cpp"]
+rules = ["@allow *.h", "@allow *.hpp", "@allow *.cpp", "@allow *.c"]
 ```
 
-### 优先级
+**转换源码文件，跳过二进制资源：**
 
-`@passthrough` > 黑名单规则 > `@allow` > 默认行为
+```toml
+[encoding.filter]
+mode = "blacklist"
+rules = [
+    "@passthrough *.png",
+    "@passthrough *.jpg",
+    "@passthrough *.gif",
+    "@passthrough *.exe",
+    "@passthrough *.dll",
+    "build/",
+    "target/",
+]
+```
+
+**混合模式：隐藏二进制、只允许源码、图片直出：**
+
+```toml
+[encoding.filter]
+mode = "whitelist"
+rules = [
+    "@allow *.h",
+    "@allow *.cpp",
+    "@allow *.md",
+    "@passthrough *.png",
+    "src/test/",
+]
+```
 
 ## 工作原理
 
