@@ -2,9 +2,19 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-透明虚拟文件系统，自动将遗留编码文件（GBK、Shift_JIS、Big5 等）转换为 UTF-8 以供读取，并在写入时将 UTF-8 转换回原始编码。挂载为虚拟驱动器后，任何应用无需任何配置即可看到干净的 UTF-8 内容。现代工具期望 UTF-8，但老项目常使用非 UTF-8 编码导致乱码，本方案在系统层面解决此问题——无需 IDE 插件、无需原地转换文件、无需手动干预。
+现代开发工具默认使用 UTF-8，但老项目中的文件常使用 GBK、Shift_JIS、Big5 等编码，在 IDE、终端和 AI 编码工具中显示为乱码或无法解析。encoding-vfs 通过挂载虚拟驱动器在系统层面透明解决此问题：
 
-A transparent virtual filesystem that automatically converts legacy-encoded files (GBK, Shift_JIS, Big5, etc.) to UTF-8 on read, and converts UTF-8 back to the original encoding on write. Mounts as a virtual drive so that any application sees clean UTF-8 content with zero configuration. Modern tools expect UTF-8, but legacy projects often use non-UTF-8 encodings that render as garbled text — this project solves the problem at the system level, with no IDE plugins, no file-in-place conversion, and no manual intervention.
+- **读取自动转换** — 将遗留编码文件自动转为 UTF-8，应用看到干净的文本
+- **写入自动还原** — 将 UTF-8 内容转回文件原始编码写入磁盘
+- **零侵入** — 无需修改文件、无需 IDE 插件、无需手动配置
+- **任意应用可用** — 挂载后 Claude Code、VS Code、`cat` 等均可直接使用
+
+Modern tools default to UTF-8, but legacy project files often use GBK, Shift_JIS, Big5, or other encodings that render as garbled text or fail to parse in IDEs, terminals, and AI coding tools. encoding-vfs solves this transparently by mounting a virtual drive at the system level:
+
+- **Automatic read conversion** — legacy-encoded files appear as clean UTF-8 to any application
+- **Automatic write restore** — UTF-8 content is converted back to the file's original encoding on disk
+- **Zero intrusion** — no file modification, no IDE plugins, no manual configuration needed
+- **Works with any app** — Claude Code, VS Code, `cat`, and any other tool works directly on the mounted drive
 
 ## Quick Start
 
