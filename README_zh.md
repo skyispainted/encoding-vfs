@@ -2,11 +2,9 @@
 
 # encoding-vfs
 
-透明虚拟文件系统，自动将遗留编码文件（GBK、Shift_JIS、Big5 等）转换为 UTF-8 以供读取，并在写入时将 UTF-8 转换回原始编码。挂载为虚拟驱动器后，任何应用无需任何配置即可看到干净的 UTF-8 内容。
+透明虚拟文件系统，自动将遗留编码文件（GBK、Shift_JIS、Big5 等）转换为 UTF-8 以供读取，并在写入时将 UTF-8 转换回原始编码。挂载为虚拟驱动器后，任何应用无需任何配置即可看到干净的 UTF-8 内容。现代工具期望 UTF-8，但老项目常使用非 UTF-8 编码导致乱码，本方案在系统层面解决此问题——无需 IDE 插件、无需原地转换文件、无需手动干预。
 
-A transparent virtual filesystem that automatically converts legacy-encoded files (GBK, Shift_JIS, Big5, etc.) to UTF-8 on read, and converts UTF-8 back to the original encoding on write. Mounts as a virtual drive so that any application sees clean UTF-8 content with zero configuration.
-
-## 问题
+A transparent virtual filesystem that automatically converts legacy-encoded files (GBK, Shift_JIS, Big5, etc.) to UTF-8 on read, and converts UTF-8 back to the original encoding on write. Mounts as a virtual drive so that any application sees clean UTF-8 content with zero configuration. Modern tools expect UTF-8, but legacy projects often use non-UTF-8 encodings that render as garbled text — this project solves the problem at the system level, with no IDE plugins, no file-in-place conversion, and no manual intervention.
 
 现代工具期望 UTF-8。但老项目常使用 GBK、Shift_JIS、Big5 等编码，显示为乱码或替换字符。本方案在**系统层面**解决——无需 IDE 插件、无需原地转换文件、无需手动干预。
 
