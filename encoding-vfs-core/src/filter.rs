@@ -16,7 +16,8 @@ pub struct FilterConfig {
 /// A single filter pattern, matching .gitignore-style semantics.
 #[derive(Debug, Clone)]
 struct Pattern {
-    matcher: GlobMatcher,
+    /// Globset matcher. If `None`, this is a "match-all" pattern (`**`).
+    matcher: Option<GlobMatcher>,
     /// `true` means "do NOT passthrough" (negation, like `!` in .gitignore).
     negated: bool,
 }
@@ -62,25 +63,30 @@ impl VfsFilter {
                 (false, line.as_str())
             };
 
-            // `**` alone在 globset 里不匹配文件，手动展开为等价形式。
-            // 同时加 `**` 和 `**/` 覆盖根目录文件 + 子目录文件。
-            let glob_matchers: Vec<GlobMatcher> = if pattern == "**" {
-                ["*", "**/**"]
-                    .iter()
-                    .filter_map(|p| Glob::new(p).ok())
-                    .map(|g| g.compile_matcher())
-                    .collect()
-            } else if let Ok(glob) = Glob::new(pattern) {
-                vec![glob.compile_matcher()]
-            } else {
-                Vec::new()
-            };
-
-            for m in glob_matchers {
+            if pattern == "**" {
+                // `**` matches everything — store as None matcher (special case).
                 patterns.push(Pattern {
-                    matcher: m,
+                    matcher: None,
                     negated,
                 });
+            } else {
+                // `.gitignore` 语义：`dir/` 表示忽略整个目录下的所有文件。
+                // globset 不直接支持这种语义，需要展开为 `{dir,dir/**}`。
+                let expanded: Vec<String> = if pattern.ends_with('/') {
+                    let dir = pattern.trim_end_matches('/');
+                    vec![dir.to_string(), format!("{dir}/**")]
+                } else {
+                    vec![pattern.to_string()]
+                };
+
+                for p in expanded {
+                    if let Ok(glob) = Glob::new(&p) {
+                        patterns.push(Pattern {
+                            matcher: Some(glob.compile_matcher()),
+                            negated,
+                        });
+                    }
+                }
             }
         }
 
@@ -94,7 +100,8 @@ impl VfsFilter {
         let mut result = false; // default: normal encoding
 
         for p in &self.patterns {
-            if p.matcher.is_match(&path_str) {
+            let matched = p.matcher.as_ref().is_none() || p.matcher.as_ref().unwrap().is_match(&path_str);
+            if matched {
                 if p.negated {
                     result = false; // negation: restore encoding
                 } else {
