@@ -214,6 +214,10 @@ detect_sample_bytes = 8192
 cache_max_entries = 10000
 cache_ttl_seconds = 3600
 
+[filter]
+mode = "blacklist"              # "blacklist" (default) or "whitelist"
+rules = ["*.dll", "logs/"]      # inline rules, same format as filter file
+
 [log]
 level = "info"
 ```
