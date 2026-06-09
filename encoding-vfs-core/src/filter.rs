@@ -62,9 +62,23 @@ impl VfsFilter {
                 (false, line.as_str())
             };
 
-            if let Ok(glob) = Glob::new(pattern) {
+            // `**` alone在 globset 里不匹配文件，手动展开为等价形式。
+            // 同时加 `**` 和 `**/` 覆盖根目录文件 + 子目录文件。
+            let glob_matchers: Vec<GlobMatcher> = if pattern == "**" {
+                ["*", "**/**"]
+                    .iter()
+                    .filter_map(|p| Glob::new(p).ok())
+                    .map(|g| g.compile_matcher())
+                    .collect()
+            } else if let Ok(glob) = Glob::new(pattern) {
+                vec![glob.compile_matcher()]
+            } else {
+                Vec::new()
+            };
+
+            for m in glob_matchers {
                 patterns.push(Pattern {
-                    matcher: glob.compile_matcher(),
+                    matcher: m,
                     negated,
                 });
             }
@@ -146,5 +160,26 @@ mod tests {
     fn test_empty_filter() {
         let f = make_filter(&[]);
         assert!(!f.is_passthrough(Path::new("anything.txt")));
+    }
+
+    #[test]
+    fn test_double_star_matches_all() {
+        // `**` matches every file including root-level and deep subdirectory files
+        let f = make_filter(&["**"]);
+        assert!(f.is_passthrough(Path::new("main.cpp")));
+        assert!(f.is_passthrough(Path::new("src/main.cpp")));
+        assert!(f.is_passthrough(Path::new("a/b/c/d.txt")));
+    }
+
+    #[test]
+    fn test_double_star_with_negation() {
+        // Only convert .h and .cpp, everything else passthrough
+        let f = make_filter(&["**", "!*.h", "!*.cpp"]);
+        assert!(!f.is_passthrough(Path::new("main.cpp")));
+        assert!(!f.is_passthrough(Path::new("src/main.cpp")));
+        assert!(!f.is_passthrough(Path::new("src/header.h")));
+        assert!(f.is_passthrough(Path::new("data.xml")));
+        assert!(f.is_passthrough(Path::new("src/data.xml")));
+        assert!(f.is_passthrough(Path::new(".git/HEAD")));
     }
 }

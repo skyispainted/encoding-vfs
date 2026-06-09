@@ -286,7 +286,7 @@ encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
 
 ```
 # .evfsignore
-**/*
+**
 !*.h
 !*.cpp
 ```
@@ -295,7 +295,7 @@ encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
 
 ```toml
 [encoding.filter]
-rules = ["**/*", "!*.h", "!*.cpp"]
+rules = ["**", "!*.h", "!*.cpp"]
 ```
 
 ---

@@ -280,12 +280,13 @@ File rules load first, config rules append.
 *.exe
 ```
 
-**Skip all images except logo.png:**
+**Only convert `.h`/`.cpp`, return raw bytes for everything else:**
 
 ```
 # .evfsignore
-*.png
-!logo.png
+**
+!*.h
+!*.cpp
 ```
 
 Or in TOML:

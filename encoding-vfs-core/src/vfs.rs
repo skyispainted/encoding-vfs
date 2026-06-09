@@ -267,30 +267,14 @@ impl EncodingVfs {
         Ok(decoded.len() as u64)
     }
 
-    /// Get file information, returning size in target encoding.
-    /// This ensures the reported size matches what read_file() returns.
+    /// Get file information.
+    /// Returns backend file size directly; no encoding conversion to avoid reading large files.
     pub fn get_file_info(&self, rel_path: &Path) -> Result<FileInfo, VfsError> {
         let full_path = self.full_path(rel_path);
         let metadata = fs::metadata(&full_path)?;
 
-        // Passthrough: report raw size directly
-        if self.filter.is_passthrough(rel_path) {
-            return Ok(FileInfo {
-                size: metadata.len(),
-                created: metadata.created()?,
-                modified: metadata.modified()?,
-                accessed: metadata.accessed()?,
-                is_dir: false,
-            });
-        }
-
-        // Calculate target encoding size
-        let raw = self.read_backend_bytes(&full_path, 0, metadata.len() as usize)?;
-        let enc = self.resolve_encoding(&full_path);
-        let (converted, _) = to_encoding(&raw, enc, self.target_encoding);
-
         Ok(FileInfo {
-            size: converted.len() as u64,
+            size: metadata.len(),
             created: metadata.created()?,
             modified: metadata.modified()?,
             accessed: metadata.accessed()?,
