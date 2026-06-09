@@ -346,7 +346,7 @@ encoding-vfs/
 
 | Feature | Platform | Description |
 |---------|----------|-------------|
-| `mount` | Windows | Enable WinFsp virtual drive mount (requires `--features mount`) |
+| `mount` | Windows | Enable WinFsp virtual drive mount. **Required for `cargo build`** — without it, the binary cannot mount drives. Prebuilt binaries already include this feature. |
 
 On Linux, the FUSE adapter is always included (no feature flag needed).
 
