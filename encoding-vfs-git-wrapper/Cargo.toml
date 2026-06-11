@@ -1,6 +1,6 @@
 ﻿[package]
 name = "encoding-vfs-git-wrapper"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Transparent git wrapper for encoding-vfs: auto-maps git commands to source directory"
 
