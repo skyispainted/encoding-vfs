@@ -286,7 +286,7 @@ impl EncodingVfs {
     }
 
     /// Get file information.
-    /// Returns backend file size directly; no encoding conversion to avoid reading large files.
+    /// Returns converted file size (target encoding) for text files.
     pub fn get_file_info(&self, rel_path: &Path) -> Result<FileInfo, VfsError> {
         // Check if path is hidden
         if self.filter.is_hidden(rel_path) {
@@ -296,8 +296,23 @@ impl EncodingVfs {
         let full_path = self.full_path(rel_path);
         let metadata = fs::metadata(&full_path)?;
 
+        // For text files, calculate converted size
+        let size = if self.filter.is_passthrough(rel_path) {
+            metadata.len()
+        } else {
+            // Read entire file and calculate converted size
+            let raw = fs::read(&full_path)?;
+            let src_enc = if self.encoding_config.source_encoding.eq_ignore_ascii_case("auto") {
+                self.resolve_encoding(&full_path)
+            } else {
+                self.source_encoding
+            };
+            let (converted, _) = to_encoding(&raw, src_enc, self.target_encoding);
+            converted.len() as u64
+        };
+
         Ok(FileInfo {
-            size: metadata.len(),
+            size,
             created: metadata.created()?,
             modified: metadata.modified()?,
             accessed: metadata.accessed()?,

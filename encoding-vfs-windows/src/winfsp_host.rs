@@ -1,5 +1,5 @@
 use std::ffi::c_void;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -67,6 +67,14 @@ impl WinFspVfsHost {
         fi.index_number = 0;
         fi.hard_links = 0;
         fi.reparse_tag = 0;
+    }
+
+    /// Get converted file size (target encoding) for a file
+    fn get_converted_size(&self, full_path: &Path, rel_path: &Path) -> u64 {
+        match self.vfs.get_file_info(rel_path) {
+            Ok(info) => info.size,
+            Err(_) => std::fs::metadata(full_path).map(|m| m.len()).unwrap_or(0),
+        }
     }
 }
 
@@ -137,8 +145,13 @@ impl FileSystemContext for WinFspVfsHost {
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
 
-        // Report backend file size directly (no encoding conversion for perf)
-        let size = if is_dir { 0 } else { metadata.len() };
+        // Use converted file size for text files
+        let size = if is_dir {
+            0
+        } else {
+            let rel = self.rel_path(&full_path);
+            self.get_converted_size(&full_path, rel)
+        };
 
         Self::fill_file_info(file_info.as_mut(), is_dir, size, modified);
 
@@ -226,7 +239,8 @@ impl FileSystemContext for WinFspVfsHost {
         let metadata = std::fs::metadata(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::now());
-        Self::fill_file_info(file_info, false, metadata.len(), modified);
+        let size = self.get_converted_size(&context.path, rel);
+        Self::fill_file_info(file_info, false, size, modified);
         Ok(())
     }
 
@@ -246,7 +260,9 @@ impl FileSystemContext for WinFspVfsHost {
         let metadata = std::fs::metadata(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::now());
-        Self::fill_file_info(file_info, false, metadata.len(), modified);
+        let rel = self.rel_path(&context.path);
+        let size = self.get_converted_size(&context.path, rel);
+        Self::fill_file_info(file_info, false, size, modified);
         Ok(())
     }
 
@@ -264,7 +280,9 @@ impl FileSystemContext for WinFspVfsHost {
         let metadata = std::fs::metadata(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        Self::fill_file_info(file_info, context.is_dir, metadata.len(), modified);
+        let rel = self.rel_path(&context.path);
+        let size = self.get_converted_size(&context.path, rel);
+        Self::fill_file_info(file_info, context.is_dir, size, modified);
         Ok(())
     }
 
@@ -275,7 +293,9 @@ impl FileSystemContext for WinFspVfsHost {
         let metadata = std::fs::metadata(&ctx.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        Self::fill_file_info(file_info, ctx.is_dir, metadata.len(), modified);
+        let rel = self.rel_path(&ctx.path);
+        let size = self.get_converted_size(&ctx.path, rel);
+        Self::fill_file_info(file_info, ctx.is_dir, size, modified);
         Ok(())
     }
 
@@ -289,7 +309,9 @@ impl FileSystemContext for WinFspVfsHost {
             let metadata = std::fs::metadata(&context.path)
                 .map_err(|_| windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND)?;
             let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-            Self::fill_file_info(file_info, false, metadata.len(), modified);
+            let rel = self.rel_path(&context.path);
+            let size = self.get_converted_size(&context.path, rel);
+            Self::fill_file_info(file_info, false, size, modified);
         }
         Ok(())
     }
@@ -345,7 +367,8 @@ impl FileSystemContext for WinFspVfsHost {
                 let metadata = std::fs::metadata(&context.path)
                     .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
                 let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                Self::fill_file_info(file_info, false, metadata.len(), modified);
+                let size = self.get_converted_size(&context.path, rel);
+                Self::fill_file_info(file_info, false, size, modified);
                 Ok(buffer.len() as u32)
             }
             Err(e) => {
