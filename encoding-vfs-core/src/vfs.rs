@@ -72,10 +72,18 @@ impl EncodingVfs {
             encoding_config.cache_ttl_seconds,
         );
 
-        let filter_path = backend_dir.join(".evfsignore");
         let filter = match &encoding_config.filter {
-            Some(fc) => VfsFilter::new(Some(&filter_path), &fc.rules),
-            None => VfsFilter::new(Some(&filter_path), &[]),
+            Some(fc) => {
+                // Add default hidden rules (.git directory) if not explicitly overridden
+                let mut hidden_rules = vec![".git/".to_string()];
+                hidden_rules.extend(fc.hidden.clone());
+                VfsFilter::new(&fc.rules, &hidden_rules)
+            }
+            None => {
+                // Default: hide .git directory
+                let default_hidden = vec![".git/".to_string()];
+                VfsFilter::new(&[], &default_hidden)
+            }
         };
 
         Ok(Self {
@@ -164,6 +172,11 @@ impl EncodingVfs {
     /// Read file content and convert from source encoding to target encoding.
     /// In "auto" source mode, detects per-file encoding.
     pub fn read_file(&self, rel_path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, VfsError> {
+        // Check if path is hidden
+        if self.filter.is_hidden(rel_path) {
+            return Err(VfsError::NotFound(rel_path.to_path_buf()));
+        }
+
         let full_path = self.full_path(rel_path);
 
         // Read raw bytes from backend
@@ -199,6 +212,11 @@ impl EncodingVfs {
     /// Write file content, converting from target encoding to source encoding.
     /// In "auto" source mode, preserves the file's existing encoding.
     pub fn write_file(&self, rel_path: &Path, offset: u64, data: &[u8]) -> Result<u64, VfsError> {
+        // Check if path is hidden
+        if self.filter.is_hidden(rel_path) {
+            return Err(VfsError::NotFound(rel_path.to_path_buf()));
+        }
+
         let full_path = self.full_path(rel_path);
 
         // Determine source encoding for the backend file
@@ -270,6 +288,11 @@ impl EncodingVfs {
     /// Get file information.
     /// Returns backend file size directly; no encoding conversion to avoid reading large files.
     pub fn get_file_info(&self, rel_path: &Path) -> Result<FileInfo, VfsError> {
+        // Check if path is hidden
+        if self.filter.is_hidden(rel_path) {
+            return Err(VfsError::NotFound(rel_path.to_path_buf()));
+        }
+
         let full_path = self.full_path(rel_path);
         let metadata = fs::metadata(&full_path)?;
 
@@ -303,6 +326,13 @@ impl EncodingVfs {
                         "failed to read metadata",
                     )))),
                 };
+
+                // Check if this entry should be hidden
+                let entry_rel_path = rel_path.join(e.file_name());
+                if self.filter.is_hidden(&entry_rel_path) {
+                    return None; // Skip hidden entries
+                }
+
                 Some(Ok(DirEntry {
                     name: e.file_name(),
                     is_dir: metadata.is_dir(),
@@ -343,11 +373,19 @@ impl EncodingVfs {
 
     /// Check if a file exists
     pub fn exists(&self, rel_path: &Path) -> bool {
+        // Hidden files are considered non-existent
+        if self.filter.is_hidden(rel_path) {
+            return false;
+        }
         self.full_path(rel_path).exists()
     }
 
     /// Check if a path is a directory
     pub fn is_dir(&self, rel_path: &Path) -> bool {
+        // Hidden paths are considered non-existent
+        if self.filter.is_hidden(rel_path) {
+            return false;
+        }
         self.full_path(rel_path).is_dir()
     }
 }

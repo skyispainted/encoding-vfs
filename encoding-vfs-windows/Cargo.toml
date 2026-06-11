@@ -1,6 +1,6 @@
-[package]
+﻿[package]
 name = "encoding-vfs-windows"
-version = "0.1.0"
+version = "0.1.3"
 edition = "2021"
 description = "WinFsp adapter for encoding-vfs: mounts GBK files as UTF-8 virtual drive"
 build = "build.rs"

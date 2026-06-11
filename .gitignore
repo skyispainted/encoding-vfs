@@ -1,11 +1,28 @@
+# Build outputs
 /target/
+dist/
+
+# Rust/Cargo
 .cargo/
-*.exe
+Cargo.lock.bak
+
+# Windows build artifacts
 *.pdb
 *.ilk
 *.lib
 *.exp
 *.obj
-*.cmd
-*.ps1
-*.bat
+
+# Keep important scripts
+!build.ps1
+!package.ps1
+!package.sh
+!install-git-wrapper.ps1
+!install-git-wrapper.sh
+
+# Keep git wrapper binary
+!git-wrapper/git.exe
+
+# OS files
+.DS_Store
+Thumbs.db

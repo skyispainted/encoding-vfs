@@ -1,91 +1,167 @@
-name: Release
+name: Build and Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
 
-permissions:
-  contents: write
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   build-windows:
-    name: Windows x64
+    name: Build Windows
     runs-on: windows-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Rust toolchain
-        run: rustup toolchain install stable --profile minimal
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
 
-      - name: Cache dependencies
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
-      - name: Build release
+      - name: Build
         run: cargo build --release
-        working-directory: ${{ github.workspace }}
 
-      - name: Upload binary
+      - name: Prepare package
         shell: pwsh
         run: |
-          Copy-Item target\release\encoding-vfs.exe encoding-vfs-Windows-x64.exe
+          $version = (Select-String -Path "encoding-vfs-cli\Cargo.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          $pkgDir = "encoding-vfs-v$version-windows-x86_64"
+          New-Item -ItemType Directory -Path $pkgDir
+          Copy-Item "target\release\encoding-vfs.exe" -Destination $pkgDir
+          Copy-Item "target\release\git.exe" -Destination $pkgDir
+          Copy-Item "install-git-wrapper.ps1" -Destination $pkgDir
+          echo "VERSION=$version" >> $env:GITHUB_ENV
+          echo "PKG_DIR=$pkgDir" >> $env:GITHUB_ENV
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
+      - name: Create archive
+        shell: pwsh
+        run: Compress-Archive -Path "$env:PKG_DIR\*" -DestinationPath "$env:PKG_DIR.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: encoding-vfs-Windows-x64.exe
-          generate_release_notes: true
-          draft: true
+          name: encoding-vfs-windows
+          path: encoding-vfs-v*-windows-x86_64.zip
 
   build-linux:
-    name: Linux x64
+    name: Build Linux
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse-dev libfuse3-dev pkg-config pkgconf
-          which pkg-config
-          pkg-config --version
+          sudo apt-get install -y fuse3 libfuse3-dev pkg-config
 
-      - name: Setup Rust toolchain
-        run: rustup toolchain install stable --profile minimal
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
 
-      - name: Cache dependencies
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
-      - name: Build release
+      - name: Build
         run: cargo build --release
 
-      - name: Upload binary
+      - name: Prepare package
         run: |
-          cp target/release/encoding-vfs encoding-vfs-Linux-x64
+          VERSION=$(grep -m1 'version' encoding-vfs-cli/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          PKG_DIR="encoding-vfs-v${VERSION}-linux-x86_64"
+          mkdir -p "$PKG_DIR"
+          cp target/release/encoding-vfs "$PKG_DIR/"
+          cp target/release/git "$PKG_DIR/"
+          chmod +x "$PKG_DIR"/*
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "PKG_DIR=$PKG_DIR" >> $GITHUB_ENV
 
-      - name: Create release
+      - name: Create install script
+        run: |
+          cat > "${{ env.PKG_DIR }}/install-git-wrapper.sh" << 'SCRIPT'
+          #!/bin/bash
+          INSTALL_DIR="$HOME/.local/bin"
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          mkdir -p "$INSTALL_DIR"
+          cp "$SCRIPT_DIR/git" "$INSTALL_DIR/git-encoding-vfs"
+          chmod +x "$INSTALL_DIR/git-encoding-vfs"
+          echo "Git wrapper installed to: $INSTALL_DIR/git-encoding-vfs"
+          SCRIPT
+          chmod +x "${{ env.PKG_DIR }}/install-git-wrapper.sh"
+
+      - name: Create README
+        run: |
+          cat > "${{ env.PKG_DIR }}/README.md" << README
+          # Encoding VFS v${{ env.VERSION }} (Linux)
+          
+          ## Contents
+          - encoding-vfs - Main VFS program
+          - git - Transparent git wrapper
+          - install-git-wrapper.sh - Installation script
+          
+          ## Quick Start
+          1. Mount: ./encoding-vfs -b /path/to/project -m /mnt/vfs
+          2. Install: ./install-git-wrapper.sh
+          3. Use: cd /mnt/vfs && git status
+          README
+
+      - name: Create archive
+        run: tar -czf "${{ env.PKG_DIR }}.tar.gz" "${{ env.PKG_DIR }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: encoding-vfs-linux
+          path: encoding-vfs-v*-linux-x86_64.tar.gz
+
+  release:
+    name: Create Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: ls -laR artifacts/
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: encoding-vfs-Linux-x64
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.tar.gz
+          draft: false
+          prerelease: false
           generate_release_notes: true
-          draft: true

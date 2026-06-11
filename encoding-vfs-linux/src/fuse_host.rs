@@ -559,6 +559,9 @@ impl Filesystem for FuseVfsHost {
 
 /// Start the FUSE virtual filesystem.
 pub fn run(host: FuseVfsHost, mount_point: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use encoding_vfs_core::{MountsRegistry, MountInfo};
+    use tracing::{info, warn};
+
     let mp = PathBuf::from(mount_point);
 
     eprintln!("Creating mount point: {:?}", mp);
@@ -570,8 +573,18 @@ pub fn run(host: FuseVfsHost, mount_point: &str) -> Result<(), Box<dyn std::erro
         })?;
     }
 
+    // Save backend_dir before host is moved
+    let backend_dir = host.vfs.backend_dir.clone();
+
+    // Load mounts registry and cleanup stale entries before mounting
+    let mut registry = MountsRegistry::load().unwrap_or_else(|e| {
+        eprintln!("Failed to load mounts registry: {}, starting fresh", e);
+        MountsRegistry::default()
+    });
+    registry.cleanup_stale();
+
     eprintln!("Mounting FUSE on: {}", mount_point);
-    eprintln!("Backend: {:?}", host.vfs.backend_dir);
+    eprintln!("Backend: {:?}", backend_dir);
 
     let options = vec![
         MountOption::FSName("EncodingVFS".to_string()),
@@ -582,7 +595,26 @@ pub fn run(host: FuseVfsHost, mount_point: &str) -> Result<(), Box<dyn std::erro
         e
     })?;
 
+    // Register mount in mounts.json
+    if let Err(e) = registry.register(MountInfo {
+        mount_point: mount_point.to_string(),
+        source: backend_dir,
+        pid: std::process::id(),
+    }) {
+        eprintln!("Failed to register mount: {}", e);
+    } else {
+        eprintln!("Registered mount in mounts.json");
+    }
+
     eprintln!("FUSE mounted successfully");
+
+    // Note: fuser::mount2 blocks until unmounted, so cleanup happens after it returns
+    // Unregister mount from mounts.json
+    if let Err(e) = registry.unregister(mount_point) {
+        eprintln!("Failed to unregister mount: {}", e);
+    } else {
+        eprintln!("Unregistered mount from mounts.json");
+    }
 
     Ok(())
 }

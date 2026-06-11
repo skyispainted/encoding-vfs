@@ -469,9 +469,21 @@ impl FileSystemContext for WinFspVfsHost {
 
 /// Start the WinFsp virtual filesystem.
 pub fn run(host: WinFspVfsHost, drive_letter: char) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    use encoding_vfs_core::{MountsRegistry, MountInfo};
+
     info!("Starting WinFsp Encoding VFS on drive {}:", drive_letter);
     info!("Backend directory: {:?}", host.vfs.backend_dir);
     info!("Default encoding: {}", host.vfs.encoding_config.default_encoding);
+
+    // Save backend_dir before host is moved
+    let backend_dir = host.vfs.backend_dir.clone();
+
+    // Load mounts registry and cleanup stale entries before mounting
+    let mut registry = MountsRegistry::load().unwrap_or_else(|e| {
+        warn!("Failed to load mounts registry: {}, starting fresh", e);
+        MountsRegistry::default()
+    });
+    registry.cleanup_stale();
 
     let mut vp = VolumeParams::new();
     vp.sector_size(512);
@@ -494,6 +506,17 @@ pub fn run(host: WinFspVfsHost, drive_letter: char) -> std::result::Result<(), B
     let mount_str = format!("{}:", drive_letter);
     fs.mount(&mount_str)?;
     fs.start()?;
+
+    // Register mount in mounts.json
+    if let Err(e) = registry.register(MountInfo {
+        mount_point: mount_str.clone(),
+        source: backend_dir,
+        pid: std::process::id(),
+    }) {
+        warn!("Failed to register mount: {}", e);
+    } else {
+        info!("Registered mount in mounts.json");
+    }
 
     info!("Encoding VFS mounted on {}:", drive_letter);
     info!("Press Ctrl+C to unmount and exit.");
@@ -527,6 +550,14 @@ pub fn run(host: WinFspVfsHost, drive_letter: char) -> std::result::Result<(), B
 
     fs.unmount();
     fs.stop();
+
+    // Unregister mount from mounts.json
+    if let Err(e) = registry.unregister(&mount_str) {
+        warn!("Failed to unregister mount: {}", e);
+    } else {
+        info!("Unregistered mount from mounts.json");
+    }
+
     info!("Encoding VFS unmounted from {}:", drive_letter);
     Ok(())
 }

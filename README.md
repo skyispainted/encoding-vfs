@@ -1,390 +1,189 @@
+﻿[English](#english) | [涓枃](#涓枃)
+
+---
+
+<a id="english"></a>
+
 # encoding-vfs
 
-[English](README.md) | [中文](README_zh.md)
+**A transparent encoding conversion virtual filesystem.**
+**閫忔槑鐨勭紪鐮佽浆鎹㈣櫄鎷熸枃浠剁郴缁熴€?*
 
-现代开发工具默认使用 UTF-8，但老项目中的文件常使用 GBK、Shift_JIS、Big5 等编码，在 IDE、终端和 AI 编码工具中显示为乱码或无法解析。encoding-vfs 通过挂载虚拟驱动器在系统层面透明解决此问题：
+---
 
-- **读取自动转换** — 将遗留编码文件自动转为 UTF-8，应用看到干净的文本
-- **写入自动还原** — 将 UTF-8 内容转回文件原始编码写入磁盘
-- **零侵入** — 无需修改文件、无需 IDE 插件、无需手动配置
-- **任意应用可用** — 挂载后 Claude Code、VS Code、`cat` 等均可直接使用
+## English
 
-Modern tools default to UTF-8, but legacy project files often use GBK, Shift_JIS, Big5, or other encodings that render as garbled text or fail to parse in IDEs, terminals, and AI coding tools. encoding-vfs solves this transparently by mounting a virtual drive at the system level:
+### The Problem
 
-- **Automatic read conversion** — legacy-encoded files appear as clean UTF-8 to any application
-- **Automatic write restore** — UTF-8 content is converted back to the file's original encoding on disk
-- **Zero intrusion** — no file modification, no IDE plugins, no manual configuration needed
-- **Works with any app** — Claude Code, VS Code, `cat`, and any other tool works directly on the mounted drive
+Modern development tools (IDEs, AI coding assistants, terminals) default to UTF-8. But legacy projects often use GBK, Shift_JIS, Big5, or other encodings that render as garbled text or fail to parse.
 
-## Quick Start
+### The Solution
 
+encoding-vfs mounts a virtual drive that **transparently converts** between source and target encodings at the system level:
+
+- **Read**: Legacy-encoded files appear as UTF-8 to any application
+- **Write**: UTF-8 content is converted back to the original encoding on disk
+- **Zero intrusion**: No file modification, no IDE plugins, no manual configuration
+- **Works with any app**: Claude Code, VS Code, Cursor, cat, git - all work directly
+- **Smart hiding**: .git and other directories hidden by default
+- **Transparent Git**: Git commands work seamlessly in mounted directories
+
+---
+
+<a id="涓枃"></a>
+
+## 涓枃
+
+### 闂
+
+鐜颁唬寮€鍙戝伐鍏凤紙IDE銆丄I 缂栫▼鍔╂墜銆佺粓绔級榛樿浣跨敤 UTF-8銆備絾閬楃暀椤圭洰缁忓父浣跨敤 GBK銆丼hift_JIS銆丅ig5 绛夌紪鐮侊紝瀵艰嚧鏄剧ず涔辩爜鎴栬В鏋愬け璐ャ€?
+### 瑙ｅ喅鏂规
+
+encoding-vfs 鍦ㄧ郴缁熺骇鍒寕杞借櫄鎷熺鐩橈紝**閫忔槑杞崲**婧愮紪鐮佸拰鐩爣缂栫爜锛?
+- **璇诲彇**锛氶仐鐣欑紪鐮佹枃浠跺湪浠讳綍搴旂敤涓樉绀轰负 UTF-8
+- **鍐欏叆**锛歎TF-8 鍐呭鑷姩杞崲鍥炲師濮嬬紪鐮佷繚瀛?- **闆朵镜鍏?*锛氫笉淇敼鏂囦欢锛屼笉闇€瑕佹彃浠讹紝鏃犻渶鎵嬪姩閰嶇疆
+- **鍏煎鎵€鏈夊簲鐢?*锛欳laude Code銆乂S Code銆丆ursor銆乧at銆乬it 閮借兘鐩存帴浣跨敤
+- **鏅鸿兘闅愯棌**锛氶粯璁ら殣钘?.git 绛夌洰褰?- **閫忔槑 Git**锛欸it 鍛戒护鍦ㄦ寕杞界洰褰曚笅鏃犵紳宸ヤ綔
+
+---
+
+## Quick Start / 蹇€熷紑濮?
 ### Windows
 
-```powershell
-# 1. Install WinFsp runtime (one-time)
+`powershell
+# 1. Install WinFsp / 瀹夎 WinFsp
 winget install WinFsp.WinFsp
 
-# 2. Download encoding-vfs-Windows-x64.exe from Releases
-# 3. Copy winfsp-x64.dll next to the exe:
+# 2. Download and extract / 涓嬭浇骞惰В鍘?# encoding-vfs-v0.1.0-windows-x86_64.zip
+
+# 3. Copy DLL / 澶嶅埗 DLL
 Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" .\
 
-# 4. Mount and go
-.\encoding-vfs.exe -b C:\legacy-project -d X
-```
+# 4. Mount / 鎸傝浇
+.\encoding-vfs.exe -b C:\legacy-project -d Y
 
-Any read/write to `X:\` is now transparently converted between the source encoding and UTF-8.
+# 5. Install git wrapper / 瀹夎 git wrapper
+.\install-git-wrapper.ps1
+
+# 6. Use git / 浣跨敤 git
+cd Y:\
+git status
+`
 
 ### Linux
 
-```bash
-# 1. Install FUSE3 runtime
+`ash
+# 1. Install FUSE3 / 瀹夎 FUSE3
 sudo apt-get install -y libfuse3-2 fuse3
 
-# 2. Download encoding-vfs-Linux-x64 from Releases
+# 2. Download and extract / 涓嬭浇骞惰В鍘?# encoding-vfs-v0.1.0-linux-x86_64.tar.gz
 
-# 3. Mount and go
+# 3. Mount / 鎸傝浇
 ./encoding-vfs -b /home/user/legacy-project -m /mnt/vfs
-```
+
+# 4. Install git wrapper / 瀹夎 git wrapper
+./install-git-wrapper.sh
+`
 
 ---
 
-## Prerequisites
+## Transparent Git / 閫忔槑 Git
 
-### Windows — WinFsp 2.1
+The git wrapper reads `~/.encoding-vfs/mounts.json` to find source directories.
 
-Required for virtual drive mount. Install via:
+Git wrapper 璇诲彇 `~/.encoding-vfs/mounts.json` 鎵惧埌婧愮洰褰曘€?
+`json
+{
+  "mounts": [
+    {
+      "mount_point": "Y:",
+      "source": "C:\\projects\\my-project",
+      "pid": 12345
+    }
+  ]
+}
+`
 
-```powershell
-winget install WinFsp.WinFsp
-```
-
-Verify the service is running:
-
-```powershell
-Get-Service WinFsp.Launcher
-# Should show Status: Running
-```
-
-### Linux — FUSE3
-
-**Ubuntu/Debian:**
-
-```bash
-sudo apt-get install -y libfuse3-2 fuse3
-```
-
-**Fedora:**
-
-```bash
-sudo dnf install -y fuse3
-```
-
-**Arch:**
-
-```bash
-sudo pacman -S fuse3
-```
+`ash
+# All git commands work transparently / 鎵€鏈?git 鍛戒护閫忔槑宸ヤ綔
+git status
+git log
+git diff
+git add .
+git commit -m "fix: update"
+git push
+`
 
 ---
 
-## Build from Source
+## Usage / 鐢ㄦ硶
 
-### Windows
+`
+encoding-vfs -b <source> [-d drive | -m mount] [-s encoding]
+`
 
-```powershell
-cargo build --release
-# Copy WinFsp DLL next to the binary:
-Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" target\release\
-```
-
-### Linux
-
-```bash
-# Install build deps
-sudo apt-get install -y libfuse3-dev pkg-config
-
-cargo build --release
-```
+| Option / 閫夐」 | Description / 璇存槑 | Default / 榛樿 |
+|--------------|-------------------|---------------|
+| `-b, --backend` | Source directory / 婧愮洰褰?| *required / 蹇呭～* |
+| `-d, --drive` | Windows drive / Windows 鐩樼 | `X` |
+| `-m, --mount` | Linux mount / Linux 鎸傝浇鐐?| `/mnt/vfs` |
+| `-s, --source-encoding` | Source encoding / 婧愮紪鐮?| `auto` |
+| `-c, --config` | Config file / 閰嶇疆鏂囦欢 | - |
 
 ---
 
-## CLI Usage
+## Configuration / 閰嶇疆
 
-```
-encoding-vfs --help
-```
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-b, --backend <DIR>` | Backend directory with original files | — |
-| `-d, --drive <LETTER>` | Windows drive letter to mount | `X` |
-| `-m, --mount <PATH>` | Linux FUSE mount point | `/mnt/vfs` |
-| `-s, --source-encoding <ENC>` | Source encoding: `auto`, `GBK`, `Shift_JIS`, `Big5` | `auto` |
-| `-t, --target-encoding <ENC>` | Encoding presented to applications | `UTF-8` |
-| `-L, --log-level <LEVEL>` | Log level: trace, debug, info, warn, error | `info` |
-| `-c, --config <FILE>` | Optional TOML config file | — |
-
-### Examples
-
-```powershell
-# Auto-detect all files, mount as UTF-8
-encoding-vfs.exe -b C:\legacy-project -d X
-
-# Fixed source encoding (faster, skips per-file detection)
-encoding-vfs.exe -b C:\sjis-project -d X -s Shift_JIS
-
-# Big5 → UTF-8
-encoding-vfs.exe -b C:\big5-project -d X -s Big5
-
-# With config file (CLI overrides config values)
-encoding-vfs.exe -b C:\legacy-project -d X -c encoding-vfs.toml
-
-# CLI overrides config file
-encoding-vfs.exe -b C:\legacy-project -d X -c config.toml -s Big5
-```
-
-### Unmount
-
-```powershell
-# Windows: Ctrl+C in terminal, or
-net use X: /delete /y
-```
-
-```bash
-# Linux: Ctrl+C in terminal, or
-fusermount3 -u /mnt/vfs
-```
-
----
-
-## Configuration File
-
-Create `encoding-vfs.toml` (pass via `-c`):
-
-```toml
-[backend]
-backend_dir = "C:\\legacy-project"   # Windows
-# backend_dir = "/home/user/legacy"  # Linux
-
-[mount]
-drive_letter = "X"
-# mount_point = "/mnt/vfs"  # Linux only
-
+`	oml
 [encoding]
 source_encoding = "auto"
 target_encoding = "UTF-8"
-default_encoding = "GBK"
-detect_sample_bytes = 8192
-cache_max_entries = 10000
-cache_ttl_seconds = 3600
 
 [encoding.filter]
-rules = ["@passthrough *.dll", "@passthrough *.exe"]
-
-[log]
-level = "info"
-```
-
-### All Options
-
-| Section | Key | Description | Default |
-|---------|-----|-------------|---------|
-| `backend` | `backend_dir` | Directory containing original files | `.` |
-| `mount` | `drive_letter` | Windows drive letter | `X` |
-| `mount` | `mount_point` | Linux FUSE mount point | `/mnt/vfs` |
-| `encoding` | `source_encoding` | Backend file encoding: `"auto"` per-file or fixed (`"GBK"`, `"Shift_JIS"`, etc.) | `auto` |
-| `encoding` | `target_encoding` | Encoding presented to applications | `UTF-8` |
-| `encoding` | `default_encoding` | Fallback when auto-detect fails | `GBK` |
-| `encoding` | `detect_sample_bytes` | Bytes read for encoding detection | `8192` |
-| `encoding` | `cache_max_entries` | Max encoding cache entries (LRU) | `10000` |
-| `encoding` | `cache_ttl_seconds` | Cache entry TTL in seconds | `3600` |
-| `encoding.filter` | `rules` | Inline rules for `@passthrough` patterns | `[]` |
-| `log` | `level` | Log verbosity | `info` |
-
-### Encoding Presets
-
-**Auto-detect → UTF-8 (most common):**
-
-```toml
-[encoding]
-source_encoding = "auto"
-target_encoding = "UTF-8"
-default_encoding = "GBK"
-```
-
-**Fixed source (faster, no detection):**
-
-```toml
-[encoding]
-source_encoding = "Shift_JIS"
-target_encoding = "UTF-8"
-```
-
-**Mount as GBK for apps that expect it:**
-
-```toml
-[encoding]
-source_encoding = "auto"
-target_encoding = "GBK"
-default_encoding = "GBK"
-```
-
-### Priority
-
-CLI flags override config file, which overrides defaults.
-
-```powershell
-# config.toml says Big5, but CLI overrides to GBK
-encoding-vfs.exe -b C:\legacy -d X -c config.toml -s GBK
-```
+rules = ["*.png", "*.exe"]
+hidden = [".git/", "node_modules/"]
+`
 
 ---
 
-## Filter
+## Build / 鏋勫缓
 
-Control which files bypass encoding conversion in the mounted drive.
-All files are always visible — the only distinction is whether encoding conversion applies.
-
-Rules follow `.gitignore` format and semantics.
-
-### Sources (merged)
-
-1. **`.evfsignore`** — place in backend directory root
-2. **`[encoding.filter] rules`** — inline in TOML config
-
-File rules load first, config rules append.
-
-### Rule Syntax
-
-| Rule | Effect | Example |
-|------|--------|---------|
-| `*.ext` | Skip encoding, return raw bytes | `*.png`, `*.exe` |
-| `dir/` | Skip encoding for directory tree | `assets/`, `lib/` |
-| `**/*.tmp` | Recursive glob | all `.tmp` files recursively |
-| `!pattern` | Negation: restore encoding for matching files | `!logo.png` |
-
-### Evaluation
-
-- Rules are evaluated **in order**; the **last matching pattern wins**.
-- Default (no match): normal encoding conversion.
-- `!pattern` negates a previous match — restores encoding for that file.
-
-### Config Example
-
-**Skip binary assets, convert everything else:**
-
-```
-# .evfsignore
-*.png
-*.jpg
-*.exe
-```
-
-**Only convert `.h`/`.cpp`, return raw bytes for everything else:**
-
-```
-# .evfsignore
-**
-!*.h
-!*.cpp
-```
-
-Or in TOML:
-
-```toml
-[encoding.filter]
-rules = ["*.png", "!logo.png"]
-```
+`powershell
+.\build.ps1
+`
 
 ---
 
-## How It Works
+## Package / 鎵撳寘
 
-### Read (source encoding → target encoding)
-
-```
-Application reads mounted file
-       │
-       ▼
-Platform callback → vfs.read_file()
-       │
-       ├── Read raw bytes from backend (e.g. GBK)
-       ├── Detect encoding (BOM + heuristic, cached)
-       │   └─ "auto": per-file detection
-       │   └─ fixed: skip detection
-       ├── Convert via encoding_rs
-       └── Return converted bytes to application
-```
-
-### Write (target encoding → source encoding)
-
-```
-Application writes mounted file (UTF-8)
-       │
-       ▼
-Platform callback → vfs.write_file()
-       │
-       ├── Detect existing file encoding (cached)
-       ├── Convert target → source encoding
-       └── Write encoded bytes to backend
-```
-
-### Encoding Detection
-
-1. **BOM check** — UTF-8 (`EF BB BF`), UTF-16 LE/BE
-2. **Content heuristic** — `encoding_rs_io` style validation
-3. **Cache** — per-file encoding cached with TTL
-4. **Fallback** — `default_encoding` when undetectable
+`powershell
+.\package.ps1
+`
 
 ---
 
-## Supported Encodings
+## CI/CD
 
-GBK, CP936, GB2312, GB18030, UTF-8, UTF-16LE, UTF-16BE, Big5, EUC-JP, EUC-KR, Shift_JIS, KOI8-R, Windows-1252, ISO-8859-x, IBM866, Macintosh, and more (full list from `encoding_rs`).
+`ash
+git tag v0.1.0
+git push origin v0.1.0
+`
 
 ---
 
-## Project Structure
+## Troubleshooting / 鏁呴殰鎺掗櫎
 
-```
-encoding-vfs/
-├── Cargo.toml
-├── encoding-vfs-core/       # Cross-platform core
-│   ├── config.rs            # TOML config
-│   ├── encoding.rs          # Encoding conversion
-│   ├── detector.rs          # BOM + heuristic detection
-│   ├── cache.rs             # LRU cache with TTL
-│   ├── vfs.rs               # Core read/write/dir
-│   └── filter.rs            # Glob-based path filter
-├── encoding-vfs-windows/    # WinFsp adapter
-│   └── winfsp_host.rs       # FileSystemContext impl
-├── encoding-vfs-linux/      # FUSE adapter
-│   └── fuse_host.rs         # fuser Filesystem impl
-├── encoding-vfs-cli/        # Unified CLI binary
-│   └── main.rs
-└── .github/workflows/
-    └── release.yml          # CI build + release
-```
+| Problem / 闂 | Solution / 瑙ｅ喅 |
+|---------------|----------------|
+| Git: "not a git repository" | Check `mounts.json` / 妫€鏌?`mounts.json` |
+| Mount fails / 鎸傝浇澶辫触 | Check WinFsp/FUSE / 妫€鏌?WinFsp/FUSE |
 
-## Build Details
+---
 
-| Crate | Role | Key Dependencies |
-|-------|------|-----------------|
-| `encoding-vfs-core` | Detection, conversion, cache, VFS | `encoding_rs`, `dashmap`, `globset`, `toml`, `serde` |
-| `encoding-vfs-windows` | WinFsp 2.1 drive mount | `winfsp 0.12`, `windows 0.61`, `encoding-vfs-core` |
-| `encoding-vfs-linux` | FUSE filesystem mount | `fuser 0.14`, `libc`, `encoding-vfs-core` |
-| `encoding-vfs-cli` | CLI binary, platform dispatch | `clap 4.4`, `tracing-subscriber` |
+## Supported Encodings / 鏀寔鐨勭紪鐮?
+GBK, Shift_JIS, Big5, UTF-8, UTF-16, EUC-JP, EUC-KR, KOI8-R, ISO-8859-x...
 
-### WinFsp Notes
+---
 
-- Uses `winfsp` crate (v0.12.6+winfsp-2.1) with `FileSystemContext` trait
-- Standard install: `winget install WinFsp.WinFsp`
-- SxS installation supported for custom builds
-- Security: returns null security descriptor, WinFsp applies defaults
-
-### FUSE Notes
-
-- Uses `fuser` crate (v0.14) with `Filesystem` trait
-- Build requires `libfuse3-dev` + `pkg-config`
-- Runtime requires `/dev/fuse` and `fusermount`/`fusermount3`
-- For multi-user access, uncomment `user_allow_other` in `/etc/fuse.conf`
+## License / 璁稿彲璇?
+MIT License

@@ -4,5 +4,6 @@ members = [
     "encoding-vfs-cli",
     "encoding-vfs-windows",
     "encoding-vfs-linux",
+    "encoding-vfs-git-wrapper",
 ]
 resolver = "2"
