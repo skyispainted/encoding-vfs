@@ -1,7 +1,7 @@
 use encoding_rs::{Encoding, GBK, UTF_8};
 use std::io::Read;
 
-use crate::encoding::{is_likely_gbk, is_likely_utf8};
+use crate::encoding::is_likely_gbk;
 
 /// Detect encoding from file content bytes.
 /// Returns the detected encoding or the default encoding if detection fails.
@@ -15,9 +15,27 @@ pub fn detect_encoding(data: &[u8], default: &'static Encoding) -> &'static Enco
         return enc;
     }
 
-    // If looks like valid UTF-8, prefer UTF-8
-    if is_likely_utf8(data) {
-        return UTF_8;
+    // Check if it's valid UTF-8 with multi-byte characters
+    // If it has multi-byte UTF-8 sequences, it's likely UTF-8
+    let (utf8_cow, _, utf8_errors) = UTF_8.decode(data);
+    if !utf8_errors && utf8_cow.len() > 0 {
+        // Check if there are actual multi-byte characters
+        let has_multibyte = data.iter().any(|&b| b > 0x7F);
+        if has_multibyte {
+            // Has multi-byte characters and is valid UTF-8
+            // But we need to check if it's more likely to be GBK
+            // GBK files often have high-byte pairs that could be valid UTF-8 by chance
+            // So we check if the UTF-8 decoding produces reasonable characters
+            let ascii_ratio = utf8_cow.chars().filter(|c| c.is_ascii()).count() as f64 / utf8_cow.chars().count().max(1) as f64;
+            // If less than 50% ASCII and valid UTF-8, likely UTF-8
+            // If more than 50% ASCII, might be GBK that happens to be valid UTF-8
+            if ascii_ratio < 0.5 {
+                return UTF_8;
+            }
+        } else {
+            // Pure ASCII, treat as UTF-8
+            return UTF_8;
+        }
     }
 
     // If looks like valid GBK, prefer GBK

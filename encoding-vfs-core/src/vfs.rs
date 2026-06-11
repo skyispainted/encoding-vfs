@@ -7,7 +7,6 @@ use encoding_rs::Encoding;
 
 use crate::cache::EncodingCache;
 use crate::config::EncodingConfig;
-use crate::detector::detect_encoding;
 use crate::encoding::{get_encoding, from_encoding, to_encoding};
 use crate::error::VfsError;
 use crate::filter::VfsFilter;
@@ -103,19 +102,12 @@ impl EncodingVfs {
     }
 
     /// Detect encoding for a file (uses cache if available)
-    pub fn resolve_encoding(&self, full_path: &Path) -> &'static Encoding {
-        // Check cache first
-        if let Some(enc) = self.cache.get(full_path) {
-            return enc;
-        }
-
-        // Read sample bytes and detect
-        let sample = self.read_backend_bytes(full_path, 0, self.encoding_config.detect_sample_bytes)
-            .unwrap_or_default();
-
-        let enc = detect_encoding(&sample, self.default_encoding);
-        self.cache.insert(full_path, enc);
-        enc
+    /// In "auto" mode, returns the default encoding (no automatic detection).
+    /// Automatic detection is unreliable for GBK vs UTF-8, so we rely on explicit configuration.
+    pub fn resolve_encoding(&self, _full_path: &Path) -> &'static Encoding {
+        // In auto mode, use default encoding (typically GBK for Chinese Windows)
+        // Automatic detection is disabled because it's unreliable
+        self.default_encoding
     }
 
     /// Read raw bytes from backend file (no encoding conversion)

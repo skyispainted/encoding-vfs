@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 use encoding_vfs_core::vfs::EncodingVfs;
 use tracing::{debug, info, warn};
@@ -20,6 +22,11 @@ pub struct FileContext {
     path: PathBuf,
     is_dir: bool,
 }
+
+/// Global write buffer cache for handling chunked writes.
+/// Key: file path, Value: accumulated write data
+static WRITE_BUFFERS: std::sync::LazyLock<Mutex<HashMap<PathBuf, Vec<u8>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// WinFsp adapter that implements the virtual filesystem operations.
 pub struct WinFspVfsHost {
@@ -161,7 +168,21 @@ impl FileSystemContext for WinFspVfsHost {
         }))
     }
 
-    fn close(&self, _context: Self::FileContext) {}
+    fn close(&self, context: Self::FileContext) {
+        info!(path = ?context.path, "close called");
+        // Flush any pending writes from the global buffer
+        let mut buffers = WRITE_BUFFERS.lock().unwrap();
+        if let Some(buffer) = buffers.remove(&context.path) {
+            if !buffer.is_empty() {
+                let rel = self.rel_path(&context.path);
+                info!(path = ?rel, bytes = buffer.len(), "flushing write buffer");
+                match self.vfs.write_file(rel, 0, &buffer) {
+                    Ok(_) => info!(path = ?rel, bytes = buffer.len(), "flushed write buffer on close"),
+                    Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer on close"),
+                }
+            }
+        }
+    }
 
     fn create(
         &self,
@@ -391,25 +412,46 @@ impl FileSystemContext for WinFspVfsHost {
             return Err(windows::Win32::Foundation::STATUS_FILE_IS_A_DIRECTORY.into());
         }
 
-        let rel = self.rel_path(&context.path);
-        match self.vfs.write_file(rel, offset, buffer) {
-            Ok(_) => {
-                // Return buffer.len() to WinFsp: this is the number of bytes it asked
-                // us to write. The actual encoded byte count may differ (UTF-8 vs GBK),
-                // but WinFsp expects this value to equal buffer.len() or it will retry
-                // writes at wrong offsets, causing duplicate/trailing content.
-                let metadata = std::fs::metadata(&context.path)
-                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
-                let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                let size = self.get_converted_size(&context.path, rel);
-                Self::fill_file_info(file_info, false, size, modified);
-                Ok(buffer.len() as u32)
+        // Buffer ALL writes regardless of offset to handle chunked writes correctly.
+        // WinFsp can split a single write into multiple chunks with different offsets.
+        // We accumulate all chunks in memory, then flush the complete buffer on close/rename.
+        // This avoids encoding issues when WinFsp splits writes across multi-byte boundaries,
+        // and avoids the bug where offset>0 writes on a new file produce space-padded garbage.
+        let mut buffers = WRITE_BUFFERS.lock().unwrap();
+        let file_buffer = buffers.entry(context.path.clone()).or_insert_with(Vec::new);
+
+        if offset == 0 {
+            // First write (or full rewrite): replace buffer content
+            file_buffer.clear();
+            file_buffer.extend_from_slice(buffer);
+        } else if offset as usize <= file_buffer.len() {
+            // Overlap with existing buffer: overwrite the overlapping part
+            let start = offset as usize;
+            let end = start + buffer.len();
+            if end > file_buffer.len() {
+                file_buffer.resize(end, 0);
             }
-            Err(e) => {
-                warn!(error = %e, path = ?rel, "write failed");
-                Err(windows::Win32::Foundation::STATUS_ACCESS_DENIED.into())
-            }
+            file_buffer[start..end].copy_from_slice(buffer);
+        } else {
+            // Gap between buffer end and this write: pad with zeros
+            file_buffer.resize(offset as usize, 0);
+            file_buffer.extend_from_slice(buffer);
         }
+
+        debug!(
+            path = ?self.rel_path(&context.path),
+            chunk_offset = offset,
+            chunk_size = buffer.len(),
+            total_buffered = file_buffer.len(),
+            "buffered write chunk"
+        );
+
+        // Update file info with the buffered size (as UTF-8)
+        let size = file_buffer.len() as u64;
+        let modified = SystemTime::now();
+        Self::fill_file_info(file_info, false, size, modified);
+
+        Ok(buffer.len() as u32)
     }
 
     fn read_directory(
@@ -490,6 +532,21 @@ impl FileSystemContext for WinFspVfsHost {
 
         if !from.exists() {
             return Err(windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND.into());
+        }
+
+        // Flush any pending writes for the source file before rename
+        {
+            let mut buffers = WRITE_BUFFERS.lock().unwrap();
+            if let Some(buffer) = buffers.remove(&from) {
+                if !buffer.is_empty() {
+                    let rel = self.rel_path(&from);
+                    info!(path = ?rel, bytes = buffer.len(), "flushing write buffer before rename");
+                    match self.vfs.write_file(rel, 0, &buffer) {
+                        Ok(_) => info!(path = ?rel, bytes = buffer.len(), "flushed write buffer before rename"),
+                        Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer before rename"),
+                    }
+                }
+            }
         }
 
         std::fs::rename(&from, &to)
