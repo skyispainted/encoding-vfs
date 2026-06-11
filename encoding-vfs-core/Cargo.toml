@@ -1,6 +1,6 @@
 ﻿[package]
 name = "encoding-vfs-core"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Cross-platform encoding VFS core: GBK <-> UTF-8 transparent conversion"
 
