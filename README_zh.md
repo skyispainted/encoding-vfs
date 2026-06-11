@@ -1,4 +1,4 @@
-﻿[English](#english) | [涓枃](#涓枃)
+[English](#english) | [中文](#中文)
 
 ---
 
@@ -7,7 +7,7 @@
 # encoding-vfs
 
 **A transparent encoding conversion virtual filesystem.**
-**閫忔槑鐨勭紪鐮佽浆鎹㈣櫄鎷熸枃浠剁郴缁熴€?*
+**透明的编码转换虚拟文件系统。**
 
 ---
 
@@ -30,108 +30,107 @@ encoding-vfs mounts a virtual drive that **transparently converts** between sour
 
 ---
 
-<a id="涓枃"></a>
+<a id="中文"></a>
 
-## 涓枃
+## 中文
 
-### 闂
+### 问题
 
-鐜颁唬寮€鍙戝伐鍏凤紙IDE銆丄I 缂栫▼鍔╂墜銆佺粓绔級榛樿浣跨敤 UTF-8銆備絾閬楃暀椤圭洰缁忓父浣跨敤 GBK銆丼hift_JIS銆丅ig5 绛夌紪鐮侊紝瀵艰嚧鏄剧ず涔辩爜鎴栬В鏋愬け璐ャ€?
-### 瑙ｅ喅鏂规
+现代开发工具（IDE、AI 编程助手、终端）默认使用 UTF-8。但遗留项目经常使用 GBK、Shift_JIS、Big5 等编码，导致显示乱码或解析失败。
 
-encoding-vfs 鍦ㄧ郴缁熺骇鍒寕杞借櫄鎷熺鐩橈紝**閫忔槑杞崲**婧愮紪鐮佸拰鐩爣缂栫爜锛?
-- **璇诲彇**锛氶仐鐣欑紪鐮佹枃浠跺湪浠讳綍搴旂敤涓樉绀轰负 UTF-8
-- **鍐欏叆**锛歎TF-8 鍐呭鑷姩杞崲鍥炲師濮嬬紪鐮佷繚瀛?- **闆朵镜鍏?*锛氫笉淇敼鏂囦欢锛屼笉闇€瑕佹彃浠讹紝鏃犻渶鎵嬪姩閰嶇疆
-- **鍏煎鎵€鏈夊簲鐢?*锛欳laude Code銆乂S Code銆丆ursor銆乧at銆乬it 閮借兘鐩存帴浣跨敤
-- **鏅鸿兘闅愯棌**锛氶粯璁ら殣钘?.git 绛夌洰褰?- **閫忔槑 Git**锛欸it 鍛戒护鍦ㄦ寕杞界洰褰曚笅鏃犵紳宸ヤ綔
+### 解决方案
+
+encoding-vfs 在系统级别挂载虚拟磁盘，**透明转换**源编码和目标编码：
+
+- **读取**：遗留编码文件在任何应用中显示为 UTF-8
+- **写入**：UTF-8 内容自动转换回原始编码保存
+- **零侵入**：不修改文件，不需要插件，无需手动配置
+- **兼容所有应用**：Claude Code、VS Code、Cursor、cat、git 都能直接使用
+- **智能隐藏**：默认隐藏 .git 等目录
+- **透明 Git**：Git 命令在挂载目录下无缝工作
 
 ---
 
-## 蹇€熷紑濮?
+## Quick Start / 快速开始
+
 ### Windows
 
-`powershell
-# 1. 瀹夎 WinFsp
+```powershell
+# 1. Install WinFsp / 安装 WinFsp
 winget install WinFsp.WinFsp
 
-# 2. 涓嬭浇骞惰В鍘?# encoding-vfs-v0.1.0-windows-x86_64.zip
+# 2. Download / 下载
+# encoding-vfs-v0.1.3-windows-x86_64.zip
 
-# 3. 澶嶅埗 DLL
+# 3. Copy DLL / 复制 DLL
 Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" .\
 
-# 4. 鎸傝浇椤圭洰
+# 4. Mount / 挂载
 .\encoding-vfs.exe -b C:\legacy-project -d Y
 
-# 5. 瀹夎 git wrapper
+# 5. Install git wrapper / 安装 git wrapper
 .\install-git-wrapper.ps1
 
-# 6. 浣跨敤 git
+# 6. Use git / 使用 git
 cd Y:\
 git status
-`
+```
 
 ### Linux
 
-`ash
-# 1. 瀹夎 FUSE3
+```bash
+# 1. Install FUSE3 / 安装 FUSE3
 sudo apt-get install -y libfuse3-2 fuse3
 
-# 2. 涓嬭浇骞惰В鍘?# encoding-vfs-v0.1.0-linux-x86_64.tar.gz
+# 2. Download / 下载
+# encoding-vfs-v0.1.3-linux-x86_64.tar.gz
 
-# 3. 鎸傝浇椤圭洰
+# 3. Mount / 挂载
 ./encoding-vfs -b /home/user/legacy-project -m /mnt/vfs
 
-# 4. 瀹夎 git wrapper
+# 4. Install git wrapper / 安装 git wrapper
 ./install-git-wrapper.sh
-`
+```
 
 ---
 
-## 閫忔槑 Git
+## Transparent Git / 透明 Git
 
-Git wrapper 璇诲彇 `~/.encoding-vfs/mounts.json` 鎵惧埌婧愮洰褰曘€?
-`json
+Git wrapper reads `~/.encoding-vfs/mounts.json` to find source directories.
+
+Git wrapper 读取 `~/.encoding-vfs/mounts.json` 找到源目录。
+
+```json
 {
-  "mounts": [
-    {
-      "mount_point": "Y:",
-      "source": "C:\\projects\\my-project",
-      "pid": 12345
-    }
-  ]
+  "mounts": [{ "mount_point": "Y:", "source": "C:\\projects\\my-project", "pid": 12345 }]
 }
-`
+```
 
-`ash
-# 鎵€鏈?git 鍛戒护閫忔槑宸ヤ綔
+```bash
 git status
 git log
 git diff
 git add .
-git commit -m "fix: 鏇存柊浠ｇ爜"
+git commit -m "fix: update"
 git push
-`
+```
 
 ---
 
-## 鍛戒护琛岀敤娉?
-`
-encoding-vfs -b <婧愮洰褰? [-d 鐩樼 | -m 鎸傝浇鐐筣 [-s 缂栫爜]
-`
+## Usage / 用法
 
-| 閫夐」 | 璇存槑 | 榛樿鍊?|
-|------|------|--------|
-| `-b, --backend` | 婧愮洰褰?| *蹇呭～* |
-| `-d, --drive` | Windows 鐩樼 | `X` |
-| `-m, --mount` | Linux 鎸傝浇鐐?| `/mnt/vfs` |
-| `-s, --source-encoding` | 婧愮紪鐮?| `auto` |
-| `-c, --config` | 閰嶇疆鏂囦欢 | - |
+| Option / 选项 | Description / 说明 | Default / 默认 |
+|--------------|-------------------|---------------|
+| `-b, --backend` | Source directory / 源目录 | *required* |
+| `-d, --drive` | Windows drive / Windows 盘符 | `X` |
+| `-m, --mount` | Linux mount / Linux 挂载点 | `/mnt/vfs` |
+| `-s, --source-encoding` | Encoding / 编码 | `auto` |
 
 ---
 
-## 閰嶇疆鏂囦欢
+## Config / 配置
 
-`	oml
+```toml
 [encoding]
 source_encoding = "auto"
 target_encoding = "UTF-8"
@@ -139,48 +138,35 @@ target_encoding = "UTF-8"
 [encoding.filter]
 rules = ["*.png", "*.exe"]
 hidden = [".git/", "node_modules/"]
-`
+```
 
 ---
 
-## 鏋勫缓
+## Build / 构建
 
-`powershell
+```powershell
 .\build.ps1
-`
+```
 
 ---
 
-## 鎵撳寘
+## Package / 打包
 
-`powershell
+```powershell
 .\package.ps1
-`
+```
 
 ---
 
 ## CI/CD
 
-`ash
-git tag v0.1.0
-git push origin v0.1.0
-`
+```bash
+git tag v0.1.3
+git push origin v0.1.3
+```
 
 ---
 
-## 鏁呴殰鎺掗櫎
+## License / 许可证
 
-| 闂 | 瑙ｅ喅 |
-|------|------|
-| Git: "not a git repository" | 妫€鏌?`mounts.json` |
-| 鎸傝浇澶辫触 | 妫€鏌?WinFsp/FUSE |
-
----
-
-## 鏀寔鐨勭紪鐮?
-GBK, Shift_JIS, Big5, UTF-8, UTF-16, EUC-JP, EUC-KR, KOI8-R, ISO-8859-x...
-
----
-
-## 璁稿彲璇?
-MIT License
+MIT
