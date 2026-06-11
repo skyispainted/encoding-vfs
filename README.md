@@ -55,6 +55,8 @@ encoding-vfs 在系统级别挂载虚拟磁盘，**透明转换**源编码和目
 
 ### Windows
 
+#### PowerShell
+
 ```powershell
 # 1. Install WinFsp / 安装 WinFsp
 winget install WinFsp.WinFsp
@@ -78,6 +80,35 @@ $env:PATH = "$PWD;$env:PATH"
 # Restart terminal / 重启终端生效
 
 # 6. Use git / 使用 git
+cd Y:\
+git status
+```
+
+#### CMD
+
+```cmd
+REM 1. Install WinFsp / 安装 WinFsp
+winget install WinFsp.WinFsp
+
+REM 2. Download and extract / 下载并解压
+REM encoding-vfs-v0.1.3-windows-x86_64.zip
+
+REM 3. Copy DLL / 复制 DLL
+copy "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" .\
+
+REM 4. Mount / 挂载
+encoding-vfs.exe -b C:\legacy-project -d Y
+
+REM 5. Setup git wrapper (choose one) / 设置 git wrapper（选一）
+
+REM Option A: Current session only / 方案A：仅当前会话
+set PATH=%CD%;%PATH%
+
+REM Option B: Permanent / 方案B：永久设置
+setx PATH "%CD%;%PATH%"
+REM Restart terminal / 重启终端生效
+
+REM 6. Use git / 使用 git
 cd Y:\
 git status
 ```
