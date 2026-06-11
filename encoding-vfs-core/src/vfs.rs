@@ -247,11 +247,11 @@ impl EncodingVfs {
         // byte positions differ between encodings. Read entire file as UTF-8,
         // splice in the new data at the UTF-8 offset, then re-encode everything.
         if offset > 0 {
-            let file_info = self.get_file_info(rel_path)?;
-            let file_size = file_info.size as usize;
-
-            // Read existing content as target encoding (UTF-8)
-            let existing = self.read_file(rel_path, 0, file_size)?;
+            // Read entire file (use a large enough buffer to read all content)
+            // Don't use file_size here because it's in UTF-8 bytes, but read_file
+            // expects the length in source encoding bytes
+            let backend_size = std::fs::metadata(&full_path)?.len() as usize;
+            let existing = self.read_file(rel_path, 0, backend_size)?;
 
             // Splice: replace at target-encoding offset
             let utf8_offset = offset as usize;
