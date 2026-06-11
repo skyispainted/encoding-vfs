@@ -274,7 +274,10 @@ impl EncodingVfs {
             return Ok(full_encoded.len() as u64);
         }
 
-        // Write to backend (offset 0: truncate and write)
+        // Write to backend (offset 0: truncate first, then write)
+        // Truncation is essential here: without it, if the new content is shorter than
+        // the existing file, old data remains at the tail, corrupting the file.
+        self.truncate_backend(&full_path)?;
         self.write_backend_bytes(&full_path, 0, &decoded)?;
 
         Ok(decoded.len() as u64)

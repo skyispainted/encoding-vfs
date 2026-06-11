@@ -28,6 +28,18 @@ pub struct FileContext {
 static WRITE_BUFFERS: std::sync::LazyLock<Mutex<HashMap<PathBuf, Vec<u8>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Global read cache for storing fully-converted file content.
+/// Key: file path, Value: (converted UTF-8 content, backend modified time)
+///
+/// This is essential for correct encoding conversion. The `read` callback receives
+/// byte offsets in the converted (UTF-8) content, but the backend file is in a
+/// different encoding (e.g., GBK). Reading the backend at arbitrary byte offsets
+/// and converting each chunk independently can split multi-byte characters at chunk
+/// boundaries, producing garbled output. By caching the fully-converted content,
+/// we ensure correct conversion regardless of chunk boundaries.
+static READ_CACHE: std::sync::LazyLock<Mutex<HashMap<PathBuf, (Vec<u8>, SystemTime)>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// WinFsp adapter that implements the virtual filesystem operations.
 pub struct WinFspVfsHost {
     vfs: EncodingVfs,
@@ -121,10 +133,13 @@ impl FileSystemContext for WinFspVfsHost {
         &self,
         file_name: &U16CStr,
         create_options: u32,
-        _granted_access: u32,
+        granted_access: u32,
         file_info: &mut OpenFileInfo,
     ) -> Result<Self::FileContext> {
         const FILE_DIRECTORY_FILE: u32 = 0x00000001;
+        const FILE_WRITE_DATA: u32 = 0x00000002;
+        const FILE_APPEND_DATA: u32 = 0x00000004;
+        const GENERIC_WRITE: u32 = 0x40000000;
 
         let name = file_name.to_string_lossy();
         let full_path = self.resolve_path(&name);
@@ -148,6 +163,17 @@ impl FileSystemContext for WinFspVfsHost {
             return Err(windows::Win32::Foundation::STATUS_NOT_A_DIRECTORY.into());
         }
 
+        // If opening with write access, clear any stale buffer for this path.
+        // This prevents data from a previous handle's failed/crashed write from
+        // being flushed when this new handle is closed.
+        let is_write_open = granted_access & (FILE_WRITE_DATA | FILE_APPEND_DATA | GENERIC_WRITE) != 0;
+        if is_write_open && !is_dir {
+            let mut buffers = WRITE_BUFFERS.lock().unwrap();
+            if buffers.remove(&full_path).is_some() {
+                info!(path = ?self.rel_path(&full_path), "cleared stale write buffer on open");
+            }
+        }
+
         let metadata = std::fs::metadata(&full_path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
@@ -169,19 +195,7 @@ impl FileSystemContext for WinFspVfsHost {
     }
 
     fn close(&self, context: Self::FileContext) {
-        info!(path = ?context.path, "close called");
-        // Flush any pending writes from the global buffer
-        let mut buffers = WRITE_BUFFERS.lock().unwrap();
-        if let Some(buffer) = buffers.remove(&context.path) {
-            if !buffer.is_empty() {
-                let rel = self.rel_path(&context.path);
-                info!(path = ?rel, bytes = buffer.len(), "flushing write buffer");
-                match self.vfs.write_file(rel, 0, &buffer) {
-                    Ok(_) => info!(path = ?rel, bytes = buffer.len(), "flushed write buffer on close"),
-                    Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer on close"),
-                }
-            }
-        }
+        // No-op: cleanup already handles flushing
     }
 
     fn create(
@@ -230,7 +244,23 @@ impl FileSystemContext for WinFspVfsHost {
         }))
     }
 
-    fn cleanup(&self, _context: &Self::FileContext, _file_name: Option<&U16CStr>, _flags: u32) {}
+    fn cleanup(&self, context: &Self::FileContext, _file_name: Option<&U16CStr>, _flags: u32) {
+        info!(path = ?context.path, "cleanup called");
+        // Flush any pending writes when the user-mode handle is closed
+        let mut buffers = WRITE_BUFFERS.lock().unwrap();
+        if let Some(buffer) = buffers.remove(&context.path) {
+            if !buffer.is_empty() {
+                let rel = self.rel_path(&context.path);
+                info!(path = ?rel, bytes = buffer.len(), "flushing write buffer on cleanup");
+                match self.vfs.write_file(rel, 0, &buffer) {
+                    Ok(_) => info!(path = ?rel, bytes = buffer.len(), "flushed write buffer on cleanup"),
+                    Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer on cleanup"),
+                }
+                // Invalidate read cache so subsequent reads get the updated content
+                READ_CACHE.lock().unwrap().remove(&context.path);
+            }
+        }
+    }
 
     fn overwrite(
         &self,
@@ -248,6 +278,8 @@ impl FileSystemContext for WinFspVfsHost {
         let rel = self.rel_path(&context.path);
         self.vfs.truncate_backend(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+        // Invalidate read cache since backend content changed
+        READ_CACHE.lock().unwrap().remove(&context.path);
         let metadata = std::fs::metadata(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::now());
@@ -268,48 +300,65 @@ impl FileSystemContext for WinFspVfsHost {
         }
 
         let rel = self.rel_path(&context.path);
+        info!(path = ?rel, new_size = new_size, "set_file_size called");
 
-        // new_size is in target encoding (UTF-8). We need to:
-        // 1. Read the current file as UTF-8
-        // 2. Truncate to new_size in UTF-8 space
-        // 3. Convert back to source encoding and write
-
-        // Read current content as UTF-8
-        let backend_size = std::fs::metadata(&context.path)
-            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?
-            .len() as usize;
-
-        let current_utf8 = match self.vfs.read_file(rel, 0, backend_size) {
-            Ok(content) => content,
-            Err(_) => {
-                // If read fails, just return current info
-                let metadata = std::fs::metadata(&context.path)
-                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
-                let modified = metadata.modified().unwrap_or(SystemTime::now());
-                let size = self.get_converted_size(&context.path, rel);
-                Self::fill_file_info(file_info, false, size, modified);
-                return Ok(());
+        // Clear/truncate any pending write buffer to stay consistent
+        {
+            let mut buffers = WRITE_BUFFERS.lock().unwrap();
+            if let Some(buffer) = buffers.get_mut(&context.path) {
+                if new_size == 0 {
+                    buffer.clear();
+                } else if (new_size as usize) < buffer.len() {
+                    buffer.truncate(new_size as usize);
+                }
             }
-        };
+        }
 
-        // Truncate or pad to new_size
-        let new_utf8 = if (new_size as usize) < current_utf8.len() {
-            current_utf8[..new_size as usize].to_vec()
-        } else if (new_size as usize) > current_utf8.len() {
-            // Pad with spaces (shouldn't normally happen)
-            let mut padded = current_utf8;
-            padded.resize(new_size as usize, b' ');
-            padded
+        if new_size == 0 {
+            // Fast path: truncate backend directly
+            self.vfs.truncate_backend(&context.path)
+                .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+            // Invalidate read cache since backend content changed
+            READ_CACHE.lock().unwrap().remove(&context.path);
         } else {
-            current_utf8
-        };
+            // Read current content, truncate/pad, and write back
+            let backend_size = std::fs::metadata(&context.path)
+                .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?
+                .len() as usize;
 
-        // Convert back to source encoding and write
-        match self.vfs.write_file(rel, 0, &new_utf8) {
-            Ok(_) => {},
-            Err(e) => {
-                tracing::warn!(error = %e, "set_file_size: write_file failed");
+            let current_utf8 = match self.vfs.read_file(rel, 0, backend_size) {
+                Ok(content) => content,
+                Err(_) => {
+                    let metadata = std::fs::metadata(&context.path)
+                        .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+                    let modified = metadata.modified().unwrap_or(SystemTime::now());
+                    let size = self.get_converted_size(&context.path, rel);
+                    Self::fill_file_info(file_info, false, size, modified);
+                    return Ok(());
+                }
+            };
+
+            let new_utf8 = if (new_size as usize) < current_utf8.len() {
+                current_utf8[..new_size as usize].to_vec()
+            } else if (new_size as usize) > current_utf8.len() {
+                let mut padded = current_utf8;
+                padded.resize(new_size as usize, b' ');
+                padded
+            } else {
+                current_utf8
+            };
+
+            // Truncate backend first, then write new content
+            self.vfs.truncate_backend(&context.path)
+                .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+            if !new_utf8.is_empty() {
+                match self.vfs.write_file(rel, 0, &new_utf8) {
+                    Ok(_) => {},
+                    Err(e) => warn!(error = %e, "set_file_size: write_file failed"),
+                }
             }
+            // Invalidate read cache since backend content changed
+            READ_CACHE.lock().unwrap().remove(&context.path);
         }
 
         let modified = std::fs::metadata(&context.path)
@@ -386,17 +435,51 @@ impl FileSystemContext for WinFspVfsHost {
         }
 
         let rel = self.rel_path(&context.path);
-        match self.vfs.read_file(rel, offset, buffer.len()) {
-            Ok(data) => {
-                let len = data.len().min(buffer.len());
-                buffer[..len].copy_from_slice(&data[..len]);
-                Ok(len as u32)
+
+        // Use read cache to serve chunks from fully-converted content.
+        // This avoids the critical bug where reading the backend file at arbitrary
+        // byte offsets and converting each chunk independently splits multi-byte
+        // characters at chunk boundaries, producing garbled UTF-8 output.
+        let converted = {
+            let mut cache = READ_CACHE.lock().unwrap();
+            let mtime = std::fs::metadata(&context.path)
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+
+            let need_refresh = cache.get(&context.path)
+                .map(|(_, cached_mtime)| *cached_mtime != mtime)
+                .unwrap_or(true);
+
+            if need_refresh {
+                // Read ENTIRE backend file and convert as a whole unit.
+                // This is the ONLY correct way to handle encoding conversion
+                // for variable-width encodings like GBK.
+                let backend_size = std::fs::metadata(&context.path)
+                    .map(|m| m.len())
+                    .unwrap_or(0) as usize;
+                match self.vfs.read_file(rel, 0, backend_size.max(1)) {
+                    Ok(full_content) => {
+                        cache.insert(context.path.clone(), (full_content, mtime));
+                    }
+                    Err(e) => {
+                        warn!(error = %e, path = ?rel, "read: failed to read full content for cache");
+                        return Err(windows::Win32::Foundation::STATUS_ACCESS_DENIED.into());
+                    }
+                }
             }
-            Err(e) => {
-                warn!(error = %e, path = ?rel, "read failed");
-                Err(windows::Win32::Foundation::STATUS_ACCESS_DENIED.into())
-            }
+
+            cache.get(&context.path).unwrap().0.clone()
+        };
+
+        // Serve the requested chunk from the cached converted content
+        let offset = offset as usize;
+        if offset >= converted.len() {
+            return Ok(0);
         }
+        let available = &converted[offset..];
+        let len = available.len().min(buffer.len());
+        buffer[..len].copy_from_slice(&available[..len]);
+        Ok(len as u32)
     }
 
     fn write(
@@ -417,6 +500,7 @@ impl FileSystemContext for WinFspVfsHost {
         // We accumulate all chunks in memory, then flush the complete buffer on close/rename.
         // This avoids encoding issues when WinFsp splits writes across multi-byte boundaries,
         // and avoids the bug where offset>0 writes on a new file produce space-padded garbage.
+
         let mut buffers = WRITE_BUFFERS.lock().unwrap();
         let file_buffer = buffers.entry(context.path.clone()).or_insert_with(Vec::new);
 
@@ -438,7 +522,7 @@ impl FileSystemContext for WinFspVfsHost {
             file_buffer.extend_from_slice(buffer);
         }
 
-        debug!(
+        info!(
             path = ?self.rel_path(&context.path),
             chunk_offset = offset,
             chunk_size = buffer.len(),
@@ -545,6 +629,8 @@ impl FileSystemContext for WinFspVfsHost {
                         Ok(_) => info!(path = ?rel, bytes = buffer.len(), "flushed write buffer before rename"),
                         Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer before rename"),
                     }
+                    // Invalidate read cache
+                    READ_CACHE.lock().unwrap().remove(&from);
                 }
             }
         }
