@@ -1,6 +1,6 @@
 ﻿[package]
 name = "encoding-vfs-cli"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 description = "CLI entry point for encoding-vfs: cross-platform GBK <-> UTF-8 transparent VFS"
 

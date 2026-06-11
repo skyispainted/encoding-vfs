@@ -225,17 +225,8 @@ impl FileSystemContext for WinFspVfsHost {
         }
         // Truncate the file to zero
         let rel = self.rel_path(&context.path);
-        match self.vfs.write_file(rel, 0, &[]) {
-            Ok(_) => {}
-            Err(_) => {
-                // Fallback: try truncating via std
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .truncate(true)
-                    .open(&context.path)
-                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
-            }
-        }
+        self.vfs.truncate_backend(&context.path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let metadata = std::fs::metadata(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::now());

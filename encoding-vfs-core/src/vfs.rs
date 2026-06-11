@@ -141,8 +141,10 @@ impl EncodingVfs {
             fs::create_dir_all(parent)?;
         }
 
-        // Always use overwrite mode (not truncate) to support incremental writes.
-        // Truncation should only happen via explicit set_len or overwrite().
+        // For offset>0, seek to position. For offset=0, just write from beginning.
+        // Note: This does NOT truncate the file. Truncation is handled by:
+        // - overwrite callback (for full file replacement)
+        // - set_file_size callback (for explicit size changes)
         let mut file = fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -154,11 +156,19 @@ impl EncodingVfs {
         }
         file.write_all(data)?;
 
-        // Don't truncate here - let set_file_size handle size changes
-
         // Invalidate cache since file was modified
         self.cache.invalidate(full_path);
 
+        Ok(())
+    }
+
+    /// Truncate backend file to zero length
+    pub fn truncate_backend(&self, full_path: &Path) -> Result<(), VfsError> {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(full_path)?;
+        self.cache.invalidate(full_path);
         Ok(())
     }
 

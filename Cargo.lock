@@ -223,7 +223,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "encoding-vfs-cli"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "clap",
  "encoding-vfs-core",
@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "encoding-vfs-core"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "dashmap",
  "dirs",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "encoding-vfs-git-wrapper"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "encoding-vfs-core",
  "serde",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "encoding-vfs-linux"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "encoding-vfs-core",
  "fuser",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "encoding-vfs-windows"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "encoding-vfs-core",
  "tracing",
@@ -357,9 +357,9 @@ checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 
 [[package]]
 name = "hashbrown"
-version = "0.17.1"
+version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 
 [[package]]
 name = "heck"
@@ -369,12 +369,12 @@ checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "indexmap"
-version = "2.14.0"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+checksum = "707907fe3c25f5424cce2cb7e1cbcafee6bdbe735ca90ef77c29e84591e5b9da"
 dependencies = [
  "equivalent",
- "hashbrown 0.17.1",
+ "hashbrown 0.15.5",
 ]
 
 [[package]]
