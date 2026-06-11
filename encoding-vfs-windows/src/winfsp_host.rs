@@ -247,20 +247,63 @@ impl FileSystemContext for WinFspVfsHost {
     fn set_file_size(
         &self,
         context: &Self::FileContext,
-        _new_size: u64,
+        new_size: u64,
         _set_allocation_size: bool,
         file_info: &mut FileInfo,
     ) -> Result<()> {
         if context.is_dir {
             return Err(windows::Win32::Foundation::STATUS_FILE_IS_A_DIRECTORY.into());
         }
-        // Don't truncate here - the actual size change happens in write().
-        // The requested size is in target encoding (UTF-8), which doesn't match
-        // the backend file's encoded size. Truncating here causes stale data at tail.
-        let metadata = std::fs::metadata(&context.path)
-            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
-        let modified = metadata.modified().unwrap_or(SystemTime::now());
+
         let rel = self.rel_path(&context.path);
+
+        // new_size is in target encoding (UTF-8). We need to:
+        // 1. Read the current file as UTF-8
+        // 2. Truncate to new_size in UTF-8 space
+        // 3. Convert back to source encoding and write
+
+        // Read current content as UTF-8
+        let backend_size = std::fs::metadata(&context.path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?
+            .len() as usize;
+
+        let current_utf8 = match self.vfs.read_file(rel, 0, backend_size) {
+            Ok(content) => content,
+            Err(_) => {
+                // If read fails, just return current info
+                let metadata = std::fs::metadata(&context.path)
+                    .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+                let modified = metadata.modified().unwrap_or(SystemTime::now());
+                let size = self.get_converted_size(&context.path, rel);
+                Self::fill_file_info(file_info, false, size, modified);
+                return Ok(());
+            }
+        };
+
+        // Truncate or pad to new_size
+        let new_utf8 = if (new_size as usize) < current_utf8.len() {
+            current_utf8[..new_size as usize].to_vec()
+        } else if (new_size as usize) > current_utf8.len() {
+            // Pad with spaces (shouldn't normally happen)
+            let mut padded = current_utf8;
+            padded.resize(new_size as usize, b' ');
+            padded
+        } else {
+            current_utf8
+        };
+
+        // Convert back to source encoding and write
+        match self.vfs.write_file(rel, 0, &new_utf8) {
+            Ok(_) => {},
+            Err(e) => {
+                tracing::warn!(error = %e, "set_file_size: write_file failed");
+            }
+        }
+
+        let modified = std::fs::metadata(&context.path)
+            .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?
+            .modified()
+            .unwrap_or(SystemTime::now());
         let size = self.get_converted_size(&context.path, rel);
         Self::fill_file_info(file_info, false, size, modified);
         Ok(())

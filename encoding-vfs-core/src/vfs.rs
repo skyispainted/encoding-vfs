@@ -141,27 +141,20 @@ impl EncodingVfs {
             fs::create_dir_all(parent)?;
         }
 
-        if offset == 0 {
-            // Full write: truncate and write from start
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(full_path)?;
-            file.write_all(data)?;
-            file.flush()?;
-        } else {
-            // Partial write: seek and write, then truncate remainder
-            let mut file = fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(full_path)?;
+        // Always use overwrite mode (not truncate) to support incremental writes.
+        // Truncation should only happen via explicit set_len or overwrite().
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(full_path)?;
+
+        if offset > 0 {
             file.seek(SeekFrom::Start(offset))?;
-            file.write_all(data)?;
-            // Truncate file to new end position
-            file.set_len(offset + data.len() as u64)?;
         }
+        file.write_all(data)?;
+
+        // Don't truncate here - let set_file_size handle size changes
 
         // Invalidate cache since file was modified
         self.cache.invalidate(full_path);
