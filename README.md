@@ -59,7 +59,7 @@ encoding-vfs 在系统级别挂载虚拟磁盘，**透明转换**源编码和目
 # 1. Install WinFsp / 安装 WinFsp
 winget install WinFsp.WinFsp
 
-# 2. Download / 下载
+# 2. Download and extract / 下载并解压
 # encoding-vfs-v0.1.3-windows-x86_64.zip
 
 # 3. Copy DLL / 复制 DLL
@@ -68,8 +68,14 @@ Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" .\
 # 4. Mount / 挂载
 .\encoding-vfs.exe -b C:\legacy-project -d Y
 
-# 5. Install git wrapper / 安装 git wrapper
-.\install-git-wrapper.ps1
+# 5. Setup git wrapper (choose one) / 设置 git wrapper（选一）
+
+# Option A: Current session only / 方案A：仅当前会话
+$env:PATH = "$PWD;$env:PATH"
+
+# Option B: Permanent / 方案B：永久设置
+[Environment]::SetEnvironmentVariable("PATH", "$PWD;$env:PATH", "User")
+# Restart terminal / 重启终端生效
 
 # 6. Use git / 使用 git
 cd Y:\
@@ -82,14 +88,24 @@ git status
 # 1. Install FUSE3 / 安装 FUSE3
 sudo apt-get install -y libfuse3-2 fuse3
 
-# 2. Download / 下载
+# 2. Download and extract / 下载并解压
 # encoding-vfs-v0.1.3-linux-x86_64.tar.gz
 
 # 3. Mount / 挂载
 ./encoding-vfs -b /home/user/legacy-project -m /mnt/vfs
 
-# 4. Install git wrapper / 安装 git wrapper
-./install-git-wrapper.sh
+# 4. Setup git wrapper (choose one) / 设置 git wrapper（选一）
+
+# Option A: Current session only / 方案A：仅当前会话
+export PATH="$PWD:$PATH"
+
+# Option B: Permanent / 方案B：永久设置
+echo 'export PATH="$PWD:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# 5. Use git / 使用 git
+cd /mnt/vfs
+git status
 ```
 
 ---

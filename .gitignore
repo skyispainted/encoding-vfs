@@ -17,8 +17,6 @@ Cargo.lock.bak
 !build.ps1
 !package.ps1
 !package.sh
-!install-git-wrapper.ps1
-!install-git-wrapper.sh
 
 # Keep git wrapper binary
 !git-wrapper/git.exe
