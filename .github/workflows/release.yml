@@ -34,6 +34,13 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install WinFsp
+        shell: pwsh
+        run: |
+          winget install WinFsp.WinFsp --accept-package-agreements --accept-source-agreements
+          # Wait for installation to complete
+          Start-Sleep -Seconds 5
+
       - name: Build
         run: cargo build --release
 
@@ -45,9 +52,38 @@ jobs:
           New-Item -ItemType Directory -Path $pkgDir
           Copy-Item "target\release\encoding-vfs.exe" -Destination $pkgDir
           Copy-Item "target\release\git.exe" -Destination $pkgDir
-          Copy-Item "install-git-wrapper.ps1" -Destination $pkgDir
+          # Copy WinFsp DLL
+          Copy-Item "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll" -Destination $pkgDir
           echo "VERSION=$version" >> $env:GITHUB_ENV
           echo "PKG_DIR=$pkgDir" >> $env:GITHUB_ENV
+
+      - name: Create README
+        shell: pwsh
+        run: |
+          $readme = @"
+          # Encoding VFS v$($env:VERSION) (Windows)
+
+          ## Contents
+          - encoding-vfs.exe - Main VFS program
+          - git.exe - Transparent git wrapper
+          - winfsp-x64.dll - WinFsp runtime library
+
+          ## Quick Start (PowerShell)
+          1. Mount: .\encoding-vfs.exe -b C:\path\to\project -d Y
+          2. Setup PATH: `$env:PATH = "`$PWD;`$env:PATH"
+          3. Use: cd Y:\; git status
+
+          ## Quick Start (CMD)
+          1. Mount: encoding-vfs.exe -b C:\path\to\project -d Y
+          2. Setup PATH: set PATH=%CD%;%PATH%
+          3. Use: cd Y:\ & git status
+
+          ## Permanent PATH setup
+          PowerShell: [Environment]::SetEnvironmentVariable("PATH", "`$PWD;`$env:PATH", "User")
+          CMD: setx PATH "%CD%;%PATH%"
+          Restart terminal after setting.
+          "@
+          Set-Content -Path "$env:PKG_DIR\README.md" -Value $readme -Encoding UTF8
 
       - name: Create archive
         shell: pwsh
@@ -100,33 +136,23 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "PKG_DIR=$PKG_DIR" >> $GITHUB_ENV
 
-      - name: Create install script
-        run: |
-          cat > "${{ env.PKG_DIR }}/install-git-wrapper.sh" << 'SCRIPT'
-          #!/bin/bash
-          INSTALL_DIR="$HOME/.local/bin"
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-          mkdir -p "$INSTALL_DIR"
-          cp "$SCRIPT_DIR/git" "$INSTALL_DIR/git-encoding-vfs"
-          chmod +x "$INSTALL_DIR/git-encoding-vfs"
-          echo "Git wrapper installed to: $INSTALL_DIR/git-encoding-vfs"
-          SCRIPT
-          chmod +x "${{ env.PKG_DIR }}/install-git-wrapper.sh"
-
       - name: Create README
         run: |
           cat > "${{ env.PKG_DIR }}/README.md" << README
           # Encoding VFS v${{ env.VERSION }} (Linux)
-          
+
           ## Contents
           - encoding-vfs - Main VFS program
           - git - Transparent git wrapper
-          - install-git-wrapper.sh - Installation script
-          
+
           ## Quick Start
           1. Mount: ./encoding-vfs -b /path/to/project -m /mnt/vfs
-          2. Install: ./install-git-wrapper.sh
+          2. Setup PATH: export PATH="\$PWD:\$PATH"
           3. Use: cd /mnt/vfs && git status
+
+          ## Permanent PATH setup
+          Add to ~/.bashrc:
+          export PATH="/path/to/extracted/folder:\$PATH"
           README
 
       - name: Create archive
