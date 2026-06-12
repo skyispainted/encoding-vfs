@@ -78,6 +78,42 @@ impl WinFspVfsHost {
             .unwrap_or(0)
     }
 
+    /// Calculate proper Windows file attributes based on file state
+    fn compute_file_attributes(full_path: &Path, is_dir: bool) -> u32 {
+        // Windows file attribute constants
+        const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        const FILE_ATTRIBUTE_ARCHIVE: u32 = 0x20;
+        const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+
+        let mut attrs = if is_dir { FILE_ATTRIBUTE_DIRECTORY } else { FILE_ATTRIBUTE_ARCHIVE };
+
+        // Check if file name starts with . (hidden on Unix-style)
+        if let Some(name) = full_path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with('.') {
+                attrs |= FILE_ATTRIBUTE_HIDDEN;
+            }
+        }
+
+        // Check if backend file is read-only
+        if !is_dir {
+            if let Ok(metadata) = std::fs::metadata(full_path) {
+                if metadata.permissions().readonly() {
+                    attrs |= FILE_ATTRIBUTE_READONLY;
+                }
+            }
+        }
+
+        // If no special attributes, use NORMAL
+        if attrs == 0 {
+            attrs = FILE_ATTRIBUTE_NORMAL;
+        }
+
+        attrs
+    }
+
     fn file_attributes(is_dir: bool) -> u32 {
         if is_dir { 0x10 } else { 0x80 }
     }
@@ -86,7 +122,23 @@ impl WinFspVfsHost {
         let mtime = Self::file_time(modified);
         fi.file_attributes = Self::file_attributes(is_dir);
         fi.file_size = size;
-        fi.allocation_size = size;
+        // Allocation size should be rounded up to nearest allocation unit (4KB typical)
+        fi.allocation_size = (size + 4095) & !4095;
+        fi.last_write_time = mtime;
+        fi.last_access_time = mtime;
+        fi.creation_time = mtime;
+        fi.change_time = mtime;
+        fi.index_number = 0;
+        fi.hard_links = 0;
+        fi.reparse_tag = 0;
+    }
+
+    /// Fill file info with proper attributes from actual file
+    fn fill_file_info_with_attrs(fi: &mut FileInfo, full_path: &Path, is_dir: bool, size: u64, modified: SystemTime) {
+        let mtime = Self::file_time(modified);
+        fi.file_attributes = Self::compute_file_attributes(full_path, is_dir);
+        fi.file_size = size;
+        fi.allocation_size = (size + 4095) & !4095;
         fi.last_write_time = mtime;
         fi.last_access_time = mtime;
         fi.creation_time = mtime;
@@ -388,13 +440,47 @@ impl FileSystemContext for WinFspVfsHost {
         last_change_time: u64,
         file_info: &mut FileInfo,
     ) -> Result<()> {
-        let _ = (file_attributes, creation_time, last_access_time, last_write_time, last_change_time);
+        use windows::Win32::Foundation::FILETIME;
+        use windows::Win32::Storage::FileSystem::SetFileTime;
+
+        let _ = (creation_time, last_access_time, last_change_time);
+
+        // Set read-only attribute if specified
+        if file_attributes != 0 {
+            const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
+            let readonly = file_attributes & FILE_ATTRIBUTE_READONLY != 0;
+            if let Ok(metadata) = std::fs::metadata(&context.path) {
+                let mut perms = metadata.permissions();
+                perms.set_readonly(readonly);
+                let _ = std::fs::set_permissions(&context.path, perms);
+            }
+        }
+
+        // Set file times if non-zero
+        if last_write_time != 0 {
+            let ft = FILETIME {
+                dwLowDateTime: last_write_time as u32,
+                dwHighDateTime: (last_write_time >> 32) as u32,
+            };
+            if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&context.path) {
+                use std::os::windows::io::AsRawHandle;
+                use windows::Win32::Foundation::HANDLE;
+                let handle = HANDLE(file.as_raw_handle() as *mut _);
+                unsafe {
+                    let _ = SetFileTime(handle, None, None, Some(&ft));
+                }
+            }
+        }
+
+        // Invalidate read cache since file metadata changed
+        READ_CACHE.lock().unwrap().remove(&context.path);
+
         let metadata = std::fs::metadata(&context.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         let rel = self.rel_path(&context.path);
         let size = self.get_converted_size(&context.path, rel);
-        Self::fill_file_info(file_info, context.is_dir, size, modified);
+        Self::fill_file_info_with_attrs(file_info, &context.path, context.is_dir, size, modified);
         Ok(())
     }
 
@@ -402,28 +488,43 @@ impl FileSystemContext for WinFspVfsHost {
         let Some(ctx) = context else {
             return Ok(());
         };
+
+        // Flush any pending writes for this file
+        {
+            let mut buffers = WRITE_BUFFERS.lock().unwrap();
+            if let Some(buffer) = buffers.remove(&ctx.path) {
+                if !buffer.is_empty() {
+                    let rel = self.rel_path(&ctx.path);
+                    info!(path = ?rel, bytes = buffer.len(), "flushing write buffer on flush");
+                    match self.vfs.write_file(rel, 0, &buffer) {
+                        Ok(_) => {},
+                        Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer"),
+                    }
+                    // Invalidate read cache
+                    READ_CACHE.lock().unwrap().remove(&ctx.path);
+                }
+            }
+        }
+
         let metadata = std::fs::metadata(&ctx.path)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         let rel = self.rel_path(&ctx.path);
         let size = self.get_converted_size(&ctx.path, rel);
-        Self::fill_file_info(file_info, ctx.is_dir, size, modified);
+        Self::fill_file_info_with_attrs(file_info, &ctx.path, ctx.is_dir, size, modified);
         Ok(())
     }
 
     fn get_file_info(&self, context: &Self::FileContext, file_info: &mut FileInfo) -> Result<()> {
-        if context.path.to_string_lossy().contains("KItem.cpp") {
-            debug!("get_file_info: path={} is_dir={}", context.path.display(), context.is_dir);
-        }
         if context.is_dir {
-            Self::fill_file_info(file_info, true, 0, SystemTime::now());
+            Self::fill_file_info_with_attrs(file_info, &context.path, true, 0, SystemTime::now());
         } else {
             let metadata = std::fs::metadata(&context.path)
                 .map_err(|_| windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND)?;
             let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
             let rel = self.rel_path(&context.path);
             let size = self.get_converted_size(&context.path, rel);
-            Self::fill_file_info(file_info, false, size, modified);
+            Self::fill_file_info_with_attrs(file_info, &context.path, false, size, modified);
         }
         Ok(())
     }
