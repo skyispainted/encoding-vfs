@@ -549,7 +549,7 @@ impl FileSystemContext for WinFspVfsHost {
     fn read_directory(
         &self,
         context: &Self::FileContext,
-        _pattern: Option<&U16CStr>,
+        pattern: Option<&U16CStr>,
         marker: DirMarker,
         buffer: &mut [u8],
     ) -> Result<u32> {
@@ -562,6 +562,17 @@ impl FileSystemContext for WinFspVfsHost {
             .vfs
             .read_dir(rel)
             .map_err(|_| windows::Win32::Foundation::STATUS_ACCESS_DENIED)?;
+
+        // Parse pattern for filtering (e.g., "*.txt")
+        let pattern_str: Option<String> = pattern
+            .map(|p| p.to_string_lossy().to_string());
+        let pattern_matcher = pattern_str.as_ref().and_then(|p| {
+            if p == "*" || p == "*.*" {
+                None // Match all
+            } else {
+                globset::Glob::new(p).ok().map(|g| g.compile_matcher())
+            }
+        });
 
         let mut cursor: u32 = 0;
 
@@ -581,8 +592,11 @@ impl FileSystemContext for WinFspVfsHost {
         // On first call (marker is None), prepend "." and ".."
         if marker.is_none() {
             let epoch = Self::file_time(SystemTime::UNIX_EPOCH);
-            add_entry(".", true, 0, epoch);
-            add_entry("..", true, 0, epoch);
+            // Only add "." and ".." if pattern matches all
+            if pattern_matcher.is_none() {
+                add_entry(".", true, 0, epoch);
+                add_entry("..", true, 0, epoch);
+            }
         }
 
         // Skip entries before the marker position
@@ -598,10 +612,14 @@ impl FileSystemContext for WinFspVfsHost {
                 continue;
             }
             let entry_name = entry.name.to_string_lossy();
-            if entry_name == "KItem.cpp" {
-                debug!("read_dir entry: name={} is_dir={} size={} mtime={:?}",
-                    entry_name, entry.is_dir, entry.size, entry.modified);
+
+            // Apply pattern filter
+            if let Some(ref matcher) = pattern_matcher {
+                if !matcher.is_match(entry_name.as_ref()) {
+                    continue;
+                }
             }
+
             let mtime = Self::file_time(entry.modified);
             if add_entry(&entry_name, entry.is_dir, entry.size, mtime).is_none() {
                 break;
