@@ -223,7 +223,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "encoding-vfs-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "encoding-vfs-core",
@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "encoding-vfs-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dashmap",
  "dirs",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "encoding-vfs-git-wrapper"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "encoding-vfs-core",
  "serde",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "encoding-vfs-linux"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "encoding-vfs-core",
  "fuser",
@@ -270,9 +270,10 @@ dependencies = [
 
 [[package]]
 name = "encoding-vfs-windows"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "encoding-vfs-core",
+ "globset",
  "tracing",
  "tracing-subscriber",
  "widestring",
