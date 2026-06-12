@@ -1,6 +1,9 @@
 use clap::Parser;
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::info;
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+use tracing::warn;
 
 #[derive(Parser, Debug)]
 #[command(name = "encoding-vfs", version, about = "Cross-platform encoding VFS: transparent source↔target conversion")]

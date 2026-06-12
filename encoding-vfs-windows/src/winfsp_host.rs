@@ -83,7 +83,6 @@ impl WinFspVfsHost {
         // Windows file attribute constants
         const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
         const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
-        const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
         const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
         const FILE_ATTRIBUTE_ARCHIVE: u32 = 0x20;
         const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
@@ -163,7 +162,7 @@ impl FileSystemContext for WinFspVfsHost {
     fn get_security_by_name(
         &self,
         file_name: &U16CStr,
-        security_descriptor: Option<&mut [c_void]>,
+        _security_descriptor: Option<&mut [c_void]>,
         _reparse_point_resolver: impl FnOnce(&U16CStr) -> Option<FileSecurity>,
     ) -> Result<FileSecurity> {
         let name = file_name.to_string_lossy();
@@ -175,11 +174,6 @@ impl FileSystemContext for WinFspVfsHost {
 
         let is_dir = full_path.is_dir();
         let attrs = Self::file_attributes(is_dir);
-
-        if name.contains("KItem.cpp") {
-            debug!("get_security_by_name: name={} full_path={} is_dir={} attrs=0x{:X}",
-                name, full_path.display(), is_dir, attrs);
-        }
 
         // Return no security descriptor; let WinFsp use defaults.
         Ok(FileSecurity {
@@ -211,11 +205,6 @@ impl FileSystemContext for WinFspVfsHost {
         let is_dir = full_path.is_dir();
         let is_dir_requested = create_options & FILE_DIRECTORY_FILE != 0;
 
-        if name.contains("KItem.cpp") {
-            debug!("open: name={} full_path={} is_dir={} is_dir_requested={} create_options=0x{:X}",
-                name, full_path.display(), is_dir, is_dir_requested, create_options);
-        }
-
         // Only reject if a directory was explicitly requested but the target is not one.
         // Allow opening a directory without FILE_DIRECTORY_FILE (common with
         // FILE_FLAG_BACKUP_SEMANTICS for handle-based operations).
@@ -230,7 +219,7 @@ impl FileSystemContext for WinFspVfsHost {
         if is_write_open && !is_dir {
             let mut buffers = WRITE_BUFFERS.lock().unwrap();
             if buffers.remove(&full_path).is_some() {
-                info!(path = ?self.rel_path(&full_path), "cleared stale write buffer on open");
+                debug!(path = ?self.rel_path(&full_path), "cleared stale write buffer on open");
             }
         }
 
@@ -254,9 +243,7 @@ impl FileSystemContext for WinFspVfsHost {
         }))
     }
 
-    fn close(&self, context: Self::FileContext) {
-        // No-op: cleanup already handles flushing
-    }
+    fn close(&self, _context: Self::FileContext) {}
 
     fn create(
         &self,
@@ -277,12 +264,6 @@ impl FileSystemContext for WinFspVfsHost {
         // Determine directory status from both create_options and file_attributes.
         let is_dir = create_options & FILE_DIRECTORY_FILE != 0
             || file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
-
-        let fname = file_name.to_string_lossy();
-        if fname.contains("KItem") || fname.contains("tmp") || fname.contains("vscode") {
-            debug!("create: name={} full_path={} is_dir={} create_options=0x{:X} file_attributes=0x{:X}",
-                fname, full_path.display(), is_dir, create_options, file_attributes);
-        }
 
         if is_dir {
             std::fs::create_dir_all(&full_path)
@@ -305,16 +286,13 @@ impl FileSystemContext for WinFspVfsHost {
     }
 
     fn cleanup(&self, context: &Self::FileContext, _file_name: Option<&U16CStr>, _flags: u32) {
-        info!(path = ?context.path, "cleanup called");
         // Flush any pending writes when the user-mode handle is closed
         let mut buffers = WRITE_BUFFERS.lock().unwrap();
         if let Some(buffer) = buffers.remove(&context.path) {
             if !buffer.is_empty() {
                 let rel = self.rel_path(&context.path);
-                info!(path = ?rel, bytes = buffer.len(), "flushing write buffer on cleanup");
-                match self.vfs.write_file(rel, 0, &buffer) {
-                    Ok(_) => info!(path = ?rel, bytes = buffer.len(), "flushed write buffer on cleanup"),
-                    Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer on cleanup"),
+                if let Err(e) = self.vfs.write_file(rel, 0, &buffer) {
+                    warn!(path = ?rel, error = %e, "failed to flush write buffer on cleanup");
                 }
                 // Invalidate read cache so subsequent reads get the updated content
                 READ_CACHE.lock().unwrap().remove(&context.path);
@@ -360,7 +338,6 @@ impl FileSystemContext for WinFspVfsHost {
         }
 
         let rel = self.rel_path(&context.path);
-        info!(path = ?rel, new_size = new_size, "set_file_size called");
 
         // Clear/truncate any pending write buffer to stay consistent
         {
@@ -495,10 +472,8 @@ impl FileSystemContext for WinFspVfsHost {
             if let Some(buffer) = buffers.remove(&ctx.path) {
                 if !buffer.is_empty() {
                     let rel = self.rel_path(&ctx.path);
-                    info!(path = ?rel, bytes = buffer.len(), "flushing write buffer on flush");
-                    match self.vfs.write_file(rel, 0, &buffer) {
-                        Ok(_) => {},
-                        Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer"),
+                    if let Err(e) = self.vfs.write_file(rel, 0, &buffer) {
+                        warn!(path = ?rel, error = %e, "failed to flush write buffer");
                     }
                     // Invalidate read cache
                     READ_CACHE.lock().unwrap().remove(&ctx.path);
@@ -631,14 +606,6 @@ impl FileSystemContext for WinFspVfsHost {
             file_buffer.extend_from_slice(buffer);
         }
 
-        info!(
-            path = ?self.rel_path(&context.path),
-            chunk_offset = offset,
-            chunk_size = buffer.len(),
-            total_buffered = file_buffer.len(),
-            "buffered write chunk"
-        );
-
         // Update file info with the buffered size (as UTF-8)
         let size = file_buffer.len() as u64;
         let modified = SystemTime::now();
@@ -681,7 +648,7 @@ impl FileSystemContext for WinFspVfsHost {
             let mut di = DirInfo::<255>::new();
             di.file_info_mut().file_attributes = Self::file_attributes(is_dir);
             di.file_info_mut().file_size = size;
-            di.file_info_mut().allocation_size = size;
+            di.file_info_mut().allocation_size = if is_dir { 0 } else { (size + 4095) & !4095 };
             di.file_info_mut().last_write_time = mtime;
             di.file_info_mut().last_access_time = mtime;
             di.file_info_mut().creation_time = mtime;
@@ -700,9 +667,12 @@ impl FileSystemContext for WinFspVfsHost {
             }
         }
 
-        // Skip entries before the marker position
+        // Skip entries before the marker position.
+        // Special case: "." and ".." are prepended entries not in the backend list.
+        // If the marker is one of these, don't skip any backend entries.
         let skip_past: Option<String> = marker.inner_as_cstr().map(|c| c.to_string_lossy());
-        let mut skipping = skip_past.is_some();
+        let is_special_marker = skip_past.as_deref() == Some(".") || skip_past.as_deref() == Some("..");
+        let mut skipping = skip_past.is_some() && !is_special_marker;
 
         for entry in entries {
             if skipping {
@@ -751,10 +721,8 @@ impl FileSystemContext for WinFspVfsHost {
             if let Some(buffer) = buffers.remove(&from) {
                 if !buffer.is_empty() {
                     let rel = self.rel_path(&from);
-                    info!(path = ?rel, bytes = buffer.len(), "flushing write buffer before rename");
-                    match self.vfs.write_file(rel, 0, &buffer) {
-                        Ok(_) => info!(path = ?rel, bytes = buffer.len(), "flushed write buffer before rename"),
-                        Err(e) => warn!(path = ?rel, error = %e, "failed to flush write buffer before rename"),
+                    if let Err(e) = self.vfs.write_file(rel, 0, &buffer) {
+                        warn!(path = ?rel, error = %e, "failed to flush write buffer before rename");
                     }
                     // Invalidate read cache
                     READ_CACHE.lock().unwrap().remove(&from);
@@ -785,7 +753,6 @@ impl FileSystemContext for WinFspVfsHost {
     }
 
     fn get_volume_info(&self, out_volume_info: &mut VolumeInfo) -> Result<()> {
-        debug!("get_volume_info called");
         out_volume_info.total_size = 1_099_511_627_776;
         out_volume_info.free_size = 549_755_813_888;
         // Use backend directory name as volume label
@@ -793,7 +760,6 @@ impl FileSystemContext for WinFspVfsHost {
             .and_then(|n| n.to_str())
             .unwrap_or("EncodingVFS");
         out_volume_info.set_volume_label(label);
-        debug!("get_volume_info -> ok");
         Ok(())
     }
 }
