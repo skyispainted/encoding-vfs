@@ -661,7 +661,11 @@ impl FileSystemContext for WinFspVfsHost {
         debug!("get_volume_info called");
         out_volume_info.total_size = 1_099_511_627_776;
         out_volume_info.free_size = 549_755_813_888;
-        out_volume_info.set_volume_label("EncodingVFS");
+        // Use backend directory name as volume label
+        let label = self.vfs.backend_dir.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("EncodingVFS");
+        out_volume_info.set_volume_label(label);
         debug!("get_volume_info -> ok");
         Ok(())
     }
