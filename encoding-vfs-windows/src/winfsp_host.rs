@@ -64,9 +64,17 @@ impl WinFspVfsHost {
     }
 
     fn file_time(system_time: SystemTime) -> u64 {
+        // Convert to Windows FILETIME: 100-nanosecond intervals since January 1, 1601
+        // UNIX epoch (1970) is 11,644,473,600 seconds after Windows epoch (1601)
+        // 11,644,473,600 seconds * 10,000,000 (100-ns intervals per second) = 116,444,736,000,000,000
+        const UNIX_EPOCH_AS_FILETIME: u64 = 116_444_736_000_000_000;
         system_time
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
+            .map(|d| {
+                // Convert to 100-nanosecond intervals and add Windows epoch offset
+                let intervals_since_unix = d.as_nanos() as u64 / 100;
+                UNIX_EPOCH_AS_FILETIME + intervals_since_unix
+            })
             .unwrap_or(0)
     }
 
